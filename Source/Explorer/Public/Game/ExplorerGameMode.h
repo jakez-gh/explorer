@@ -4,7 +4,7 @@
 #include "GameFramework/GameModeBase.h"
 #include "ExplorerGameMode.generated.h"
 
-class ASimpleTerrainActor;
+class ATerrainStreamer;
 
 UCLASS()
 class EXPLORER_API AExplorerGameMode : public AGameModeBase
@@ -20,12 +20,13 @@ protected:
 
 	// Spawned at the origin if the level doesn't already contain a terrain actor.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Terrain")
-	TSubclassOf<ASimpleTerrainActor> TerrainClass;
+	TSubclassOf<ATerrainStreamer> TerrainClass;
 
 	// Height above the terrain surface at which the player starts.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Flight")
-	float StartAltitude = 5000.0f;
+	float StartAltitude = 20000.0f;
 
 private:
-	ASimpleTerrainActor* FindOrSpawnTerrain();
+	void SetupDreamAtmosphere();
+	ATerrainStreamer* FindOrSpawnTerrain();
 };

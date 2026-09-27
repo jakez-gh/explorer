@@ -1,15 +1,25 @@
 #include "Game/ExplorerGameMode.h"
 #include "Flight/FlightPawn.h"
-#include "Procedural/SimpleTerrainActor.h"
-#include "EngineUtils.h"
+#include "Game/ExplorerPlayerController.h"
+#include "Procedural/TerrainStreamer.h"
+#include "Procedural/WorldGen.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/ExponentialHeightFogComponent.h"
+#include "Components/SkyLightComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/ExponentialHeightFog.h"
+#include "Engine/PostProcessVolume.h"
+#include "Engine/SkyLight.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
-#include "Components/StaticMeshComponent.h"
+#include "EngineUtils.h"
 
 AExplorerGameMode::AExplorerGameMode()
 {
 	DefaultPawnClass = AFlightPawn::StaticClass();
-	TerrainClass = ASimpleTerrainActor::StaticClass();
+	PlayerControllerClass = AExplorerPlayerController::StaticClass();
+	TerrainClass = ATerrainStreamer::StaticClass();
 }
 
 void AExplorerGameMode::BeginPlay()
@@ -27,25 +37,152 @@ void AExplorerGameMode::BeginPlay()
 		}
 	}
 
+	SetupDreamAtmosphere();
 	UE_LOG(LogTemp, Log, TEXT("ExplorerGameMode started"));
+}
+
+void AExplorerGameMode::SetupDreamAtmosphere()
+{
+	// A low, warm sun: the long light of late afternoon.
+	for (TActorIterator<ADirectionalLight> It(GetWorld()); It; ++It)
+	{
+		UDirectionalLightComponent* Sun = Cast<UDirectionalLightComponent>(It->GetLightComponent());
+		Sun->SetMobility(EComponentMobility::Movable);
+		Sun->SetWorldRotation(FRotator(-13.0f, 35.0f, 0.0f));
+		Sun->SetLightColor(FLinearColor(1.0f, 0.84f, 0.66f));
+		Sun->SetIntensity(7.0f);
+	}
+
+	// Soft haze that swallows the far distance, glowing warm towards the sun.
+	for (TActorIterator<AExponentialHeightFog> It(GetWorld()); It; ++It)
+	{
+		UExponentialHeightFogComponent* Fog = It->GetComponent();
+		// Low falloff keeps the haze nearly as thick up high as near the ground, so the edge of the
+		// streamed world dissolves at any altitude.
+		Fog->SetFogDensity(0.016f);
+		Fog->SetFogHeightFalloff(0.03f);
+		Fog->SetStartDistance(25000.0f);
+		Fog->SetFogInscatteringColor(FLinearColor(0.48f, 0.44f, 0.58f));
+		Fog->SetDirectionalInscatteringExponent(6.0f);
+		Fog->SetDirectionalInscatteringColor(FLinearColor(0.55f, 0.36f, 0.24f));
+	}
+
+	for (TActorIterator<ASkyLight> It(GetWorld()); It; ++It)
+	{
+		It->GetLightComponent()->RecaptureSky();
+	}
+
+	// Gentle bloom, a vignette, and slightly warm, lifted colour.
+	APostProcessVolume* Post = GetWorld()->SpawnActor<APostProcessVolume>();
+	Post->bUnbound = true;
+	FPostProcessSettings& S = Post->Settings;
+	S.bOverride_BloomIntensity = true;
+	S.BloomIntensity = 1.6f;
+	S.bOverride_VignetteIntensity = true;
+	S.VignetteIntensity = 0.6f;
+	S.bOverride_WhiteTemp = true;
+	S.WhiteTemp = 5900.0f;
+	S.bOverride_ColorSaturation = true;
+	S.ColorSaturation = FVector4(1.08f, 1.05f, 1.12f, 1.0f);
+	S.bOverride_ColorGamma = true;
+	S.ColorGamma = FVector4(1.0f, 1.0f, 1.0f, 1.04f);
+	S.bOverride_SceneFringeIntensity = true;
+	S.SceneFringeIntensity = 0.5f;
+	S.bOverride_MotionBlurAmount = true;
+	S.MotionBlurAmount = 0.15f;
 }
 
 APawn* AExplorerGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)
 {
-	FVector Location = FVector::ZeroVector;
-	if (const ASimpleTerrainActor* Terrain = FindOrSpawnTerrain())
-	{
-		Location = Terrain->GetActorLocation();
-		Location.Z = Terrain->GetHeightAtLocation(FVector2D(Location));
-	}
-	Location.Z += StartAltitude;
+	FindOrSpawnTerrain();
 
-	return SpawnDefaultPawnAtTransform(NewPlayer, FTransform(FRotator::ZeroRotator, Location));
+	// -BiomeReport logs where each biome can be found, for testing and exploring.
+	if (FParse::Param(FCommandLine::Get(), TEXT("BiomeReport")))
+	{
+		TMap<EBiome, FVector2D> Found;
+		for (int32 Ring = 0; Ring < 60 && Found.Num() < 10; ++Ring)
+		{
+			const int32 Steps = FMath::Max(1, Ring * 8);
+			for (int32 i = 0; i < Steps; ++i)
+			{
+				const float Angle = 2.0f * PI * i / Steps;
+				const FVector2D P(FMath::Cos(Angle) * Ring * 500000.0f, FMath::Sin(Angle) * Ring * 500000.0f);
+				const EBiome Biome = WorldGen::Sample(P.X, P.Y).Biome;
+				if (!Found.Contains(Biome))
+				{
+					Found.Add(Biome, P);
+					UE_LOG(LogTemp, Display, TEXT("BiomeReport: biome %d nearest at X=%.0f Y=%.0f (%.1f km)"), static_cast<int32>(Biome), P.X, P.Y, P.Size() / 100000.0f);
+				}
+			}
+		}
+
+		// Nearest landmark of each kind, searching region cells outwards from the origin.
+		auto Report = [](const TCHAR* Kind, double CellSize, TFunctionRef<bool(int32, int32, FVector&)> Find)
+		{
+			FVector Best;
+			double BestDist = TNumericLimits<double>::Max();
+			for (int32 CY = -12; CY <= 12; ++CY)
+			{
+				for (int32 CX = -12; CX <= 12; ++CX)
+				{
+					FVector P;
+					if (FVector2D(CX, CY).Size() * CellSize < BestDist && Find(CX, CY, P) && FVector2D(P).Size() < BestDist)
+					{
+						Best = P;
+						BestDist = FVector2D(P).Size();
+					}
+				}
+			}
+			if (BestDist < TNumericLimits<double>::Max())
+			{
+				UE_LOG(LogTemp, Display, TEXT("BiomeReport: nearest %s at X=%.0f Y=%.0f Z=%.0f (%.1f km)"), Kind, Best.X, Best.Y, Best.Z, BestDist / 100000.0);
+			}
+		};
+		Report(TEXT("village"), ATerrainStreamer::VillageCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindVillage(X, Y, P); });
+		Report(TEXT("city"), ATerrainStreamer::CityCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindCity(X, Y, P); });
+		Report(TEXT("floating island"), ATerrainStreamer::IslandCellSize(), [](int32 X, int32 Y, FVector& P) { float R; return ATerrainStreamer::FindFloatingIsland(X, Y, P, R); });
+	}
+
+	// -StartX= / -StartY= pick the starting point (world units); otherwise start over land near the origin.
+	FVector Location = FVector::ZeroVector;
+	// -StartZ= sets an absolute height, -StartYaw= / -StartPitch= the initial heading.
+	if (FParse::Value(FCommandLine::Get(), TEXT("StartX="), Location.X) | FParse::Value(FCommandLine::Get(), TEXT("StartY="), Location.Y))
+	{
+		Location.Z = FMath::Max(WorldGen::Height(Location.X, Location.Y), 0.0f) + StartAltitude;
+		FParse::Value(FCommandLine::Get(), TEXT("StartZ="), Location.Z);
+		FRotator Rotation(-5.0f, 0.0f, 0.0f);
+		FParse::Value(FCommandLine::Get(), TEXT("StartYaw="), Rotation.Yaw);
+		FParse::Value(FCommandLine::Get(), TEXT("StartPitch="), Rotation.Pitch);
+		return SpawnDefaultPawnAtTransform(NewPlayer, FTransform(Rotation, Location));
+	}
+	for (int32 Ring = 0; Ring < 40; ++Ring)
+	{
+		bool bFound = false;
+		const int32 Steps = FMath::Max(1, Ring * 6);
+		for (int32 i = 0; i < Steps && !bFound; ++i)
+		{
+			const float Angle = 2.0f * PI * i / Steps;
+			const FVector Candidate(FMath::Cos(Angle) * Ring * 300000.0f, FMath::Sin(Angle) * Ring * 300000.0f, 0.0);
+			const FWorldSample S = WorldGen::Sample(Candidate.X, Candidate.Y);
+			if (S.Land > 0.9f && S.Mountains < 0.2f && S.Height > 500.0f)
+			{
+				Location = Candidate;
+				bFound = true;
+			}
+		}
+		if (bFound)
+		{
+			break;
+		}
+	}
+	Location.Z = FMath::Max(WorldGen::Height(Location.X, Location.Y), 0.0f) + StartAltitude;
+
+	return SpawnDefaultPawnAtTransform(NewPlayer, FTransform(FRotator(-5.0f, 0.0f, 0.0f), Location));
 }
 
-ASimpleTerrainActor* AExplorerGameMode::FindOrSpawnTerrain()
+ATerrainStreamer* AExplorerGameMode::FindOrSpawnTerrain()
 {
-	for (TActorIterator<ASimpleTerrainActor> It(GetWorld()); It; ++It)
+	for (TActorIterator<ATerrainStreamer> It(GetWorld()); It; ++It)
 	{
 		return *It;
 	}
@@ -57,5 +194,5 @@ ASimpleTerrainActor* AExplorerGameMode::FindOrSpawnTerrain()
 
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	return GetWorld()->SpawnActor<ASimpleTerrainActor>(TerrainClass, FTransform::Identity, Params);
+	return GetWorld()->SpawnActor<ATerrainStreamer>(TerrainClass, FTransform::Identity, Params);
 }
