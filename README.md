@@ -33,16 +33,54 @@ Explorer/
 ## Development Setup
 
 ### Prerequisites
-- **Unreal Engine 5.4** — [Install from Epic Games Launcher](https://www.epicgames.com/unrealengine/download)
-- **Visual Studio 2022** (Windows) or **Xcode** (Mac) — for C++ development
-- **Git LFS** — for large binary files (recommended)
+- **Epic Games Launcher** — [Download here](https://www.epicgames.com/store/download)
+- **Unreal Engine 5.4** — Install via Epic Games Launcher
+- **Visual Studio 2022** (Windows) — [Download Community Edition (free)](https://visualstudio.microsoft.com/vs/community/)
+- **Git** — [Download here](https://git-scm.com/download/win)
 
-### Quick Start
-1. Clone this repo
+### Installation Steps
+
+#### 1. Install Epic Games Launcher
+- Download from https://www.epicgames.com/store/download
+- Run the installer and sign in with your Epic Games account
+
+#### 2. Install Unreal Engine 5.4
+- Open Epic Games Launcher
+- Go to **Unreal Engine** tab → **Library**
+- Click **Install** for Unreal Engine 5.4
+- Choose your installation location (default is fine)
+- Wait for install to complete (~100GB)
+
+#### 3. Install Visual Studio 2022 (if needed)
+- Download Community Edition: https://visualstudio.microsoft.com/vs/community/
+- Run installer
+- Select **Desktop development with C++** workload
+- Complete installation
+
+#### 4. Generate and Build Project
+1. Navigate to the `Explorer` folder
 2. Right-click `Explorer.uproject` → **Generate Visual Studio project files**
 3. Open `Explorer.sln` in Visual Studio
-4. Build the project
-5. Open `Explorer.uproject` in Unreal Editor
+4. Build → **Build Solution** (or press Ctrl+Shift+B)
+5. Wait for compilation (~5-15 minutes first time)
+
+#### 5. Open in Unreal Editor
+- Double-click `Explorer.uproject`
+- Unreal Editor will open and load the project
+- First load may take a few minutes
+
+### First Run
+1. In the Unreal Editor, create a new level or open the default level
+2. Drag a **SimpleTerrainActor** into the level (search in Place Actors panel)
+3. Set the World Settings → Game Mode → **ExplorerGameMode**
+4. Plug in your controller
+5. Press Play (Alt+P) and fly around!
+
+**Controls:**
+- **Left Stick** — Move forward/back/strafe
+- **Right Stick** — Look around
+- **Triggers** — Ascend/Descend
+- **ESC** — Return to editor
 
 ## Design Notes
 

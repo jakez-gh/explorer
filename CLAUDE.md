@@ -3,7 +3,7 @@
 ## Project Overview
 **Explorer** is a first-person flying exploration game in Unreal Engine 5.4. The core feeling is flight through wilderness—natural and alien terrain, procedurally generated, minimalist UI, pure discovery.
 
-**Status:** Pre-production (foundation setup phase)
+**Status:** Ready to build and test. Engine/tools installation needed.
 
 ## Game Pillars
 1. **Flight** — Smooth, responsive first-person flying (not walking)
@@ -27,12 +27,19 @@
 - **First-person only** — no third-person view
 - **Continuous flight** — no landing or walking
 
-## Next Steps
-1. Create Unreal project file (Explorer.uproject)
-2. Set up basic flight controller in C++
-3. Implement basic procedural terrain generation
-4. Build camera and movement feel
-5. Add procedural biome variety
+## Current Status
+✅ Unreal project file created (`Explorer.uproject`)
+✅ Flight controller implemented (FlightPawn with gamepad support)
+✅ Basic procedural terrain generation (SimpleTerrainActor with Perlin noise)
+✅ Game mode and spawning system (ExplorerGameMode)
+✅ Build configuration ready (ProceduralMeshComponent integrated)
+
+## Next Steps (when engine is running)
+1. Test flight controls with controller
+2. Polish flight feel (acceleration curves, speed ramping)
+3. Add terrain variety (biomes, different noise patterns)
+4. Implement camera smoothing
+5. Add simple visual polish (materials, lighting)
 
 ## Reference Materials
 - Unreal Flight Physics & Camera Systems
