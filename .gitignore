@@ -1,0 +1,33 @@
+# Unreal Engine
+Binaries/
+Intermediate/
+Saved/
+.vs/
+.vscode/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+
+# Build artifacts
+DerivedDataCache/
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+.directory
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local development
+.local/
+local_config.ini
