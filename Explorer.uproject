@@ -1,0 +1,23 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.4",
+	"Category": "Adventure",
+	"Description": "First-person flying exploration game through wilderness",
+	"Modules": [
+		{
+			"Name": "Explorer",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "WorldPartition",
+			"Enabled": true
+		},
+		{
+			"Name": "RuntimeAudioImporter",
+			"Enabled": false
+		}
+	]
+}
