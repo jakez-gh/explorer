@@ -12,12 +12,12 @@
 	],
 	"Plugins": [
 		{
-			"Name": "WorldPartition",
+			"Name": "ProceduralMeshComponent",
 			"Enabled": true
 		},
 		{
-			"Name": "RuntimeAudioImporter",
-			"Enabled": false
+			"Name": "EnhancedInput",
+			"Enabled": true
 		}
 	]
 }

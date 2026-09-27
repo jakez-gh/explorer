@@ -6,25 +6,19 @@ public class Explorer : ModuleRules
 {
 	public Explorer(ReadOnlyTargetRules Target) : base(Target)
 	{
-		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		// UE 5.4 headers fail on MSVC 14.40+ (which ships sanitizer/asan_interface.h): ConcurrentLinearAllocator.h
+		// then evaluates clang's __has_feature, tripping C4668/C4067. Disable that path for this module, and skip the
+		// engine's shared PCH, which is compiled without this definition.
+		PCHUsage = PCHUsageMode.NoPCHs;
+		PrivateDefinitions.Add("PLATFORM_HAS_ASAN_INCLUDE=0");
 
-		PublicDependencies.AddRange(new string[] {
+		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core",
 			"CoreUObject",
 			"Engine",
 			"InputCore",
 			"EnhancedInput",
-			"Niagara",
 			"ProceduralMeshComponent"
-		});
-
-		PrivateDependencies.AddRange(new string[] {
-		});
-
-		// Enable for procedural generation
-		PublicIncludePaths.AddRange(new string[] {
-			System.IO.Path.Combine(ModuleDirectory, "Public/Procedural"),
-			System.IO.Path.Combine(ModuleDirectory, "Public/Flight")
 		});
 	}
 }
