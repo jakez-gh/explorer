@@ -55,6 +55,8 @@ void AFlightPawn::Tick(float DeltaTime)
 
 	if (MovementComponent)
 	{
+		CurrentVelocity = FMath::Lerp(CurrentVelocity, DesiredVelocity, DeltaTime * 2.0f);
+
 		AddMovementInput(GetActorForwardVector(), CurrentVelocity.X);
 		AddMovementInput(GetActorRightVector(), CurrentVelocity.Y);
 		AddMovementInput(GetActorUpVector(), CurrentVelocity.Z);
@@ -64,8 +66,8 @@ void AFlightPawn::Tick(float DeltaTime)
 void AFlightPawn::Move(const FInputActionValue& Value)
 {
 	const FVector2D MovementVector = Value.Get<FVector2D>();
-	CurrentVelocity.X = MovementVector.Y;
-	CurrentVelocity.Y = MovementVector.X;
+	DesiredVelocity.X = MovementVector.Y;
+	DesiredVelocity.Y = MovementVector.X;
 }
 
 void AFlightPawn::Look(const FInputActionValue& Value)
@@ -78,5 +80,5 @@ void AFlightPawn::Look(const FInputActionValue& Value)
 void AFlightPawn::Ascend(const FInputActionValue& Value)
 {
 	const float AscendAxisValue = Value.Get<float>();
-	CurrentVelocity.Z = AscendAxisValue;
+	DesiredVelocity.Z = AscendAxisValue;
 }

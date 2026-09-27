@@ -43,6 +43,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Movement")
 	float Acceleration = 5000.0f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Input")
+	bool bUseGamepad = true;
+
 	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual void Tick(float DeltaTime) override;
@@ -53,4 +56,5 @@ private:
 	void Ascend(const FInputActionValue& Value);
 
 	FVector CurrentVelocity = FVector::ZeroVector;
+	FVector DesiredVelocity = FVector::ZeroVector;
 };

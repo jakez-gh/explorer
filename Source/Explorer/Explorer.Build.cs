@@ -14,7 +14,8 @@ public class Explorer : ModuleRules
 			"Engine",
 			"InputCore",
 			"EnhancedInput",
-			"Niagara"
+			"Niagara",
+			"ProceduralMeshComponent"
 		});
 
 		PrivateDependencies.AddRange(new string[] {
