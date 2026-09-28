@@ -42,7 +42,7 @@ public:
 
 	// Chunks within this radius get scanned trees (beyond the detail radius, trees only).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
-	int32 TreeRadius = 11;
+	int32 TreeRadius = 15;
 
 	// Chunks within this radius get collision.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
@@ -159,6 +159,9 @@ private:
 	// Loaded scanned trees: height (cm) per slot; 0 if not available.
 	float ScannedTreeHeight[NumScannedTrees] = {};
 	int32 NumLoadedScanned = 0;
+	// Loaded slots split into tall mature trees (the canopy) and young understory trees.
+	TArray<int32> MatureSlots;
+	TArray<int32> YoungSlots;
 
 	struct FChunk
 	{

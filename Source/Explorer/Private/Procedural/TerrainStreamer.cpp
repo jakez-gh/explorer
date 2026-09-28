@@ -50,7 +50,7 @@ namespace
 
 	// Grass tiles align with the 5 m terrain grid so blades sit exactly on the rendered surface.
 	constexpr double GrassTileSize = 2000.0;
-	constexpr int32 GrassClumpsPerSide = 16;
+	constexpr int32 GrassClumpsPerSide = 22;
 
 	float Smooth(float Edge0, float Edge1, float X)
 	{
@@ -276,7 +276,17 @@ void ATerrainStreamer::BeginPlay()
 			++NumLoadedScanned;
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("Loaded %d scanned tree meshes"), NumLoadedScanned);
+	MatureSlots.Reset();
+	YoungSlots.Reset();
+	for (int32 i = 0; i < NumLoadedScanned; ++i)
+	{
+		(ScannedTreeHeight[i] >= 1800.0f ? MatureSlots : YoungSlots).Add(i);
+	}
+	if (MatureSlots.Num() == 0)
+	{
+		MatureSlots = YoungSlots;
+	}
+	UE_LOG(LogTemp, Log, TEXT("Loaded %d scanned tree meshes (%d mature, %d young)"), NumLoadedScanned, MatureSlots.Num(), YoungSlots.Num());
 	for (int32 Variant = 0; Variant < NumIslandVariants; ++Variant)
 	{
 		PartMeshes[Island0 + Variant] = CreateIslandMesh(Variant);
@@ -959,7 +969,7 @@ void ATerrainStreamer::BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstan
 			Transforms.Add(FTransform(FRotator(0.0f, WorldGen::HashFloat(HX, HY, 606) * 360.0f, 0.0f), FVector(P.X, P.Y, Height - 3.0f), FVector(Size, Size, Size * Tall)));
 
 			// Lush green to summer straw with dryness; darker under trees; slight per-clump variation.
-			FLinearColor Tint = FMath::Lerp(FLinearColor(1.0f, 1.0f, 1.0f), FLinearColor(2.0f, 1.55f, 0.7f), S.Dryness) * FMath::Lerp(1.0f, 0.75f, S.Forest);
+			FLinearColor Tint = FMath::Lerp(FLinearColor(1.0f, 1.0f, 1.0f), FLinearColor(1.4f, 1.2f, 0.8f), S.Dryness * 0.7f) * FMath::Lerp(1.0f, 0.75f, S.Forest);
 			Tint = Jitter(Tint, WorldGen::HashFloat(HX, HY, 607), 0.15f);
 			Data.Append({ Tint.R, Tint.G, Tint.B });
 		}
@@ -1367,9 +1377,17 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch, 
 					&& S.Biome != EBiome::Taiga && S.Biome != EBiome::Tundra && S.Biome != EBiome::Snow;
 				if (bTemperate && NumLoadedScanned > 0 && Kind >= 0.24f)
 				{
-					const int32 Slot = FMath::Min(FMath::FloorToInt(Tint * NumLoadedScanned), NumLoadedScanned - 1);
-					// Scanned at real size (up to ~48 m tall); vary a little, and sink the root flare into the ground.
-					const float Scale = FMath::Lerp(0.6f, 1.0f, WorldGen::HashFloat(CX, CY, SeedTreeSize));
+					// Mostly mature canopy trees; a fifth young understory trees (only near, where you'd see them).
+					const bool bYoung = YoungSlots.Num() > 0 && Kind < 0.24f + 0.76f * 0.2f;
+					if (bYoung && bTreesOnly)
+					{
+						continue;
+					}
+					const TArray<int32>& Pool = bYoung ? YoungSlots : MatureSlots;
+					const int32 Slot = Pool[FMath::Min(FMath::FloorToInt(Tint * Pool.Num()), Pool.Num() - 1)];
+					// Scanned at real size; vary a little, and sink the root flare into the ground.
+					const float Scale = bYoung ? FMath::Lerp(0.75f, 1.0f, WorldGen::HashFloat(CX, CY, SeedTreeSize))
+						: FMath::Lerp(0.85f, 1.1f, WorldGen::HashFloat(CX, CY, SeedTreeSize));
 					Batch.Add(static_cast<EPropPart>(Scanned0 + Slot), Ground - FVector(0, 0, 25.0f), Spin, FVector(Scale), White);
 					if (!bTreesOnly)
 					{

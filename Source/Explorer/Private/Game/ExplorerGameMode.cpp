@@ -79,6 +79,11 @@ void AExplorerGameMode::SetupDreamAtmosphere()
 	S.BloomIntensity = 0.5f;
 	S.bOverride_VignetteIntensity = true;
 	S.VignetteIntensity = 0.25f;
+	// Hold exposure down so bright ground and sky aren't washed out.
+	S.bOverride_AutoExposureBias = true;
+	S.AutoExposureBias = -0.8f;
+	S.bOverride_ColorContrast = true;
+	S.ColorContrast = FVector4(1.0f, 1.0f, 1.0f, 1.08f);
 	S.bOverride_MotionBlurAmount = true;
 	S.MotionBlurAmount = 0.0f;
 }

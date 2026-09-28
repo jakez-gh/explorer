@@ -156,18 +156,19 @@ grass = g.lerp(g.sample(tex("T_Ground_Grass_D"), near_xy), g.sample(tex("T_Groun
 grass = g.lerp(grass, g.sample(tex("T_Ground_Grass_D"), far_xy), g.const(0.3))
 # Tone the bright, fuzzy texture down to a natural meadow floor, and let patches of bare soil show
 # through (the 3D blades on top carry the look of grass up close).
-grass = g.mul(grass, g.color(0.78, 0.88, 0.66))
+# Deep, slightly blue-green meadow tone: the photo is bright and yellow on its own.
+grass = g.mul(grass, g.color(0.5, 0.66, 0.4))
 soil_xy, _, _ = g.world_uvs(380.0)
 # Soil and litter use only the gravel texture's brightness pattern (its own colour is orange).
-soil = g.mul(g.mask(g.sample(tex("T_Ground_Gravel_D"), soil_xy), g=True), g.color(0.36, 0.28, 0.19))
+soil = g.mul(g.mask(g.sample(tex("T_Ground_Gravel_D"), soil_xy), g=True), g.color(0.2, 0.16, 0.11))
 patch_xy, _, _ = g.world_uvs(1300.0)
 patches = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mask(g.sample(tex("T_Perlin_Noise_M"), patch_xy), r=True), g.const(0.45)), g.const(2.5)))
 grass = g.lerp(grass, soil, g.mul(patches, g.const(0.3)))
 depth = g.node(unreal.MaterialExpressionPixelDepth)
 fade = g.saturate(g.mul(depth, g.const(1.0 / 25000.0)))
-grass = g.lerp(grass, g.color(0.085, 0.11, 0.045), g.mul(fade, g.const(0.85)))
-dry_grass = g.mul(grass, g.color(1.45, 1.12, 0.5))
-color = g.lerp(grass, dry_grass, dryness)
+grass = g.lerp(grass, g.color(0.05, 0.075, 0.03), g.mul(fade, g.const(0.85)))
+dry_grass = g.mul(grass, g.color(1.25, 1.08, 0.68))
+color = g.lerp(grass, dry_grass, g.mul(dryness, g.const(0.7)))
 
 # Forest floor: brown leaf litter and earth with only a little moss.
 moss_xy, _, _ = g.world_uvs(420.0)
