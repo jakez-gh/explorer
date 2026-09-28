@@ -184,10 +184,11 @@ ATerrainStreamer::ATerrainStreamer()
 	// Tree meshes are generated in BeginPlay.
 	PartMeshes.SetNum(NumParts);
 	PartMaterials.SetNum(NumParts);
-	for (int32 Part = Tree0; Part < NumParts; ++Part)
+	for (int32 Part = Tree0; Part < Scanned0; ++Part)
 	{
 		PartMaterials[Part] = BarkMaterial;
 	}
+	// Scanned trees keep their own materials (null here means "don't override").
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> IslandMat(TEXT("/Game/Explorer/Materials/M_Island.M_Island"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BarkFarMat(TEXT("/Game/Explorer/Materials/M_BarkFar.M_BarkFar"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FoliageFarMat(TEXT("/Game/Explorer/Materials/M_FoliageFar.M_FoliageFar"));
@@ -240,6 +241,42 @@ void ATerrainStreamer::BeginPlay()
 		PartMeshes[Tree0 + Variant] = CreateTreeMesh(static_cast<ETreeVariant>(Variant), TreeTemplates[Variant]);
 	}
 	PartMeshes[IslandTree] = PartMeshes[Tree0 + TreeBroadleafA];
+
+	// Photoscanned Megascans trees (free Fab packs, not in git; see CLAUDE.md). Missing packs just
+	// leave the generated broadleaf trees in place.
+	static const TCHAR* ScannedPaths[NumScannedTrees] = {
+		TEXT("EuropeanBeech/Geometry/SimpleWind/SM_EuropeanBeech_Forest_01"),
+		TEXT("EuropeanBeech/Geometry/SimpleWind/SM_EuropeanBeech_Forest_02"),
+		TEXT("EuropeanBeech/Geometry/SimpleWind/SM_EuropeanBeech_Forest_03"),
+		TEXT("EuropeanBeech/Geometry/SimpleWind/SM_EuropeanBeech_Forest_04"),
+		TEXT("EuropeanBeech/Geometry/SimpleWind/SM_EuropeanBeech_Forest_05"),
+		TEXT("EuropeanBeech/Geometry/SimpleWind/SM_EuropeanBeech_Forest_06"),
+		TEXT("EuropeanBeech/Geometry/SimpleWind/SM_EuropeanBeech_Forest_07"),
+		TEXT("EuropeanBeech/Geometry/SimpleWind/SM_EuropeanBeech_Forest_08"),
+		TEXT("EuropeanBeech/Geometry/SimpleWind/SM_EuropeanBeech_Field_01"),
+		TEXT("NorwayMaple/Geometry/SimpleWind/SM_NorwayMaple_Forest_01"),
+		TEXT("NorwayMaple/Geometry/SimpleWind/SM_NorwayMaple_Forest_02"),
+		TEXT("NorwayMaple/Geometry/SimpleWind/SM_NorwayMaple_Forest_03"),
+		TEXT("NorwayMaple/Geometry/SimpleWind/SM_NorwayMaple_Forest_04"),
+		TEXT("NorwayMaple/Geometry/SimpleWind/SM_NorwayMaple_Forest_05"),
+		TEXT("NorwayMaple/Geometry/SimpleWind/SM_NorwayMaple_Forest_06"),
+		TEXT("NorwayMaple/Geometry/SimpleWind/SM_NorwayMaple_Forest_07"),
+		TEXT("NorwayMaple/Geometry/SimpleWind/SM_NorwayMaple_Field_01"),
+		TEXT("NorwayMaple/Geometry/SimpleWind/SM_NorwayMaple_Field_02"),
+	};
+	NumLoadedScanned = 0;
+	for (int32 i = 0; i < NumScannedTrees; ++i)
+	{
+		const FString Name = FPaths::GetBaseFilename(ScannedPaths[i]);
+		UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *FString::Printf(TEXT("/Game/%s.%s"), ScannedPaths[i], *Name), nullptr, LOAD_Quiet | LOAD_NoWarn);
+		if (Mesh)
+		{
+			PartMeshes[Scanned0 + NumLoadedScanned] = Mesh;
+			ScannedTreeHeight[NumLoadedScanned] = Mesh->GetBoundingBox().GetSize().Z;
+			++NumLoadedScanned;
+		}
+	}
+	UE_LOG(LogTemp, Log, TEXT("Loaded %d scanned tree meshes"), NumLoadedScanned);
 	for (int32 Variant = 0; Variant < NumIslandVariants; ++Variant)
 	{
 		PartMeshes[Island0 + Variant] = CreateIslandMesh(Variant);
@@ -616,7 +653,8 @@ void ATerrainStreamer::Tick(float DeltaTime)
 			const FIntPoint Coord = Center + FIntPoint(DX, DY);
 			const int32 Step = StepForDistance(FMath::Sqrt(static_cast<float>(DistSq)));
 			const bool bCollision = DistSq <= CollisionRadius * CollisionRadius;
-			const EProps Props = DistSq <= DetailRadius * DetailRadius ? EProps::Full : EProps::Landmarks;
+			const EProps Props = DistSq <= DetailRadius * DetailRadius ? EProps::Full
+				: (NumLoadedScanned > 0 && DistSq <= TreeRadius * TreeRadius) ? EProps::Trees : EProps::Landmarks;
 
 			const FChunk* Existing = Chunks.Find(Coord);
 			if (!Existing || Existing->Step != Step || (bCollision && !Existing->bHasCollision) || Existing->Props != Props)
@@ -1177,9 +1215,13 @@ void ATerrainStreamer::BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps 
 	AddLighthouses(Coord, Batch);
 	AddVolcanoGlow(Coord, Batch);
 	AddFloatingIslands(Coord, Batch);
+	if (Level == EProps::Trees)
+	{
+		AddVegetation(Coord, Batch, true);
+	}
 	if (Level == EProps::Full)
 	{
-		AddVegetation(Coord, Batch);
+		AddVegetation(Coord, Batch, false);
 		AddVillages(Coord, Batch);
 		AddStoneCircles(Coord, Batch);
 	}
@@ -1230,7 +1272,7 @@ void ATerrainStreamer::BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps 
 	Chunk.bPropCollision = false;
 }
 
-void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) const
+void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch, bool bTreesOnly) const
 {
 	constexpr double Cell = 1300.0;
 	const int32 CellsPerChunk = FMath::RoundToInt(ChunkWorldSize() / Cell);
@@ -1320,6 +1362,27 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) 
 					continue;
 				}
 
+				// Temperate broadleaf woods use the photoscanned trees when they're installed.
+				const bool bTemperate = S.Biome != EBiome::Desert && S.Biome != EBiome::Savanna && S.Biome != EBiome::Jungle
+					&& S.Biome != EBiome::Taiga && S.Biome != EBiome::Tundra && S.Biome != EBiome::Snow;
+				if (bTemperate && NumLoadedScanned > 0 && Kind >= 0.24f)
+				{
+					const int32 Slot = FMath::Min(FMath::FloorToInt(Tint * NumLoadedScanned), NumLoadedScanned - 1);
+					// Scanned at real size (up to ~48 m tall); vary a little, and sink the root flare into the ground.
+					const float Scale = FMath::Lerp(0.6f, 1.0f, WorldGen::HashFloat(CX, CY, SeedTreeSize));
+					Batch.Add(static_cast<EPropPart>(Scanned0 + Slot), Ground - FVector(0, 0, 25.0f), Spin, FVector(Scale), White);
+					if (!bTreesOnly)
+					{
+						const float H = ScannedTreeHeight[Slot] * Scale;
+						Batch.Add(Trunk, Ground + FVector(0, 0, H * 0.2f), Spin, FVector(80.0f * Scale, 80.0f * Scale, H * 0.4f), White);
+					}
+					continue;
+				}
+				if (bTreesOnly)
+				{
+					continue;
+				}
+
 				switch (S.Biome)
 				{
 				case EBiome::Desert:
@@ -1358,6 +1421,10 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) 
 					break;
 				}
 				}
+			}
+			else if (bTreesOnly)
+			{
+				continue;
 			}
 			else if (Chance < S.TreeDensity + ShrubChance)
 			{
@@ -1876,7 +1943,10 @@ UHierarchicalInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPa
 		Component = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
 		Component->SetMobility(EComponentMobility::Movable);
 		Component->SetStaticMesh(PartMeshes[Part]);
-		Component->SetMaterial(0, PartMaterials[Part]);
+		if (PartMaterials[Part])
+		{
+			Component->SetMaterial(0, PartMaterials[Part]);
+		}
 		// Trunk colliders, rocks and buildings are solid so you can weave between trees; foliage and the
 		// tree wood meshes themselves are not (the colliders stand in for trunks). Vegetation dissolves
 		// in and out smoothly by distance in its materials, so there's no hard cull distance here.

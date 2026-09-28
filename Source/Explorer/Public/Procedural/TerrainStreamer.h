@@ -40,6 +40,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
 	int32 DetailRadius = 4;
 
+	// Chunks within this radius get scanned trees (beyond the detail radius, trees only).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
+	int32 TreeRadius = 8;
+
 	// Chunks within this radius get collision.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
 	int32 CollisionRadius = 2;
@@ -94,8 +98,10 @@ private:
 		Tree0, Tree1, Tree2, Tree3, Tree4, Tree5, Tree6, Tree7, // runtime-built tree wood meshes
 		IslandTree, // broadleaf wood that never fades, for floating islands
 		Island0, Island1, Island2, Island3, // runtime-built floating island meshes
-		NumParts
+		Scanned0, // photoscanned Megascans trees (Nanite), loaded if the packs are installed
+		NumParts = Scanned0 + 18
 	};
+	static constexpr int32 NumScannedTrees = NumParts - Scanned0;
 
 	// Surface selector for M_Prop (custom data 4).
 	enum ESurface : uint8
@@ -146,8 +152,13 @@ private:
 	{
 		None,
 		Landmarks,
+		Trees, // landmarks plus scanned trees (cheap with Nanite), for the middle distance
 		Full,
 	};
+
+	// Loaded scanned trees: height (cm) per slot; 0 if not available.
+	float ScannedTreeHeight[NumScannedTrees] = {};
+	int32 NumLoadedScanned = 0;
 
 	struct FChunk
 	{
@@ -194,7 +205,7 @@ private:
 	UStaticMesh* CreateGrassClumpMesh();
 	static void SetInstances(UHierarchicalInstancedStaticMeshComponent* Component, const TArray<FTransform>& Transforms, const TArray<float>& CustomData);
 	void BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps Level);
-	void AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) const;
+	void AddVegetation(const FIntPoint& Coord, FPropBatch& Batch, bool bTreesOnly) const;
 	void AddVillages(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddStoneCircles(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddCities(const FIntPoint& Coord, FPropBatch& Batch) const;

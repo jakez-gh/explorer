@@ -24,6 +24,8 @@
   - `-FlightDebug` logs fps, altitude and velocity once a second
   - `-NewGame` ignores the save and starts fresh; otherwise the last position (saved every 5 s and on quit, `Saved/SaveGames/Explorer.sav`) is restored
 - **Assets:** Engine Starter Content (not committed — run `Tools/setup_content.ps1` after cloning) supplies photographed textures, `SM_Rock` and `SM_Bush`. Materials are generated from it by `Tools/create_materials.py` (`UnrealEditor-Cmd.exe <repo>\Explorer.uproject -run=pythonscript -script=<repo>\Tools\create_materials.py -unattended -nullrhi`). Buildings/landmarks are still basic shapes with world-projected photo textures; truly photoreal trees and architecture need scanned assets (Megascans/Fab) — the next big step.
+- **Fab packs (free, not committed, ~10 GB):** Quixel Megascans *European Beech* and *Norway Maple* (Content/EuropeanBeech, Content/NorwayMaple, Content/MSPresets). Add via Editor > Window > Fab > "Add to Project". Loaded at runtime; if missing, temperate forests fall back to generated trees. Megaplants (incl. all free conifers) need UE 5.7+; free Megascans rocks are UEFN-only (UE use is paid).
+- **Rendering:** Shader Model 6 (DX12) for Nanite; first launch after shader/asset changes spends several minutes compiling shaders and building Nanite data (cached afterwards).
 - **Rendering:** Lumen GI + reflections, virtual shadow maps (`Config/DefaultEngine.ini`).
 
 ## Architecture
