@@ -175,11 +175,11 @@ namespace WorldGen
 		const FBiomeInfo Biomes[] = {
 			{ EBiome::Desert,    Srgb(0xD9B27A), 0.015f, 0.0f },
 			{ EBiome::Savanna,   Srgb(0xA89A4E), 0.06f,  0.0f },
-			{ EBiome::Jungle,    Srgb(0x2F5A22), 0.80f,  0.5f },
+			{ EBiome::Jungle,    Srgb(0x2F5A22), 0.90f,  0.5f },
 			{ EBiome::Grassland, Srgb(0x7E9A45), 0.04f,  0.1f },
-			{ EBiome::Forest,    Srgb(0x4A6E2E), 0.55f,  0.2f },
+			{ EBiome::Forest,    Srgb(0x4A6E2E), 0.80f,  0.2f },
 			{ EBiome::Tundra,    Srgb(0x8C8A74), 0.01f,  0.1f },
-			{ EBiome::Taiga,     Srgb(0x44583A), 0.50f,  0.2f },
+			{ EBiome::Taiga,     Srgb(0x44583A), 0.75f,  0.2f },
 		};
 		const float Weights[] = {
 			Hot * Dry,

@@ -38,7 +38,7 @@ public:
 
 	// Chunks within this radius get vegetation, rocks and small settlements.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
-	int32 DetailRadius = 5;
+	int32 DetailRadius = 4;
 
 	// Chunks within this radius get collision.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
@@ -54,7 +54,7 @@ public:
 
 	// Blades of grass are planted within this distance of the viewer.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Grass")
-	float GrassRadius = 12000.0f;
+	float GrassRadius = 8000.0f;
 
 	// No grass is built when the viewer is higher than this above the ground (it couldn't be seen).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Grass")
@@ -146,6 +146,8 @@ private:
 		UHierarchicalInstancedStaticMeshComponent* Parts[NumParts] = {};
 		int32 Step = 0;
 		bool bHasCollision = false;
+		// Whether this chunk's solid props (trunks, rocks, buildings) currently collide.
+		bool bPropCollision = false;
 		EProps Props = EProps::None;
 	};
 
@@ -176,6 +178,7 @@ private:
 	void UpdateGrass(const FVector& ViewLocation, double Deadline);
 	void BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstancedStaticMeshComponent* Component) const;
 	UStaticMesh* CreateGrassClumpMesh();
+	static void SetInstances(UHierarchicalInstancedStaticMeshComponent* Component, const TArray<FTransform>& Transforms, const TArray<float>& CustomData);
 	void BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps Level);
 	void AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddVillages(const FIntPoint& Coord, FPropBatch& Batch) const;

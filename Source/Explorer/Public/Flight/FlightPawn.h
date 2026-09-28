@@ -86,17 +86,23 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Look")
 	float MouseSensitivity = 0.15f;
 
-	// Closest you can get to the ground or water when flying slowly (you can skim among the trees).
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Ground")
-	float MinGroundClearance = 150.0f;
+	// Lowest height held above ground or water (you can skim among the trees).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
+	float MinGroundClearance = 200.0f;
 
-	// Extra clearance per unit of speed, so fast flight stays safely above the terrain (seconds of warning).
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Ground")
-	float ClearancePerSpeed = 0.15f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
+	float MaxAltitude = 300000.0f;
 
-	// How gently a dive is levelled out as the ground approaches (seconds to close the remaining gap).
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Ground")
-	float GroundEaseTime = 0.6f;
+	// How fast full stick changes the held height near the ground (cm/s); it scales up with height.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
+	float AltitudeChangeRate = 800.0f;
+
+	// How firmly the held height is tracked (1/s), and the vertical acceleration available (cm/s^2).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
+	float AltitudeStiffness = 3.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
+	float AltitudeAccel = 5000.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Feel")
 	float FieldOfView = 90.0f;
@@ -135,6 +141,8 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> RiseAction;
 
+	float TargetAltitude = 1000.0f;
+	float VerticalSpeed = 0.0f;
 	float FlightYaw = 0.0f;
 	float FlightPitch = 0.0f;
 	float Bank = 0.0f;

@@ -51,6 +51,7 @@ void AExplorerGameMode::SetupDreamAtmosphere()
 		Sun->SetMobility(EComponentMobility::Movable);
 		Sun->SetWorldRotation(FRotator(-32.0f, 35.0f, 0.0f));
 		Sun->SetLightColor(FLinearColor(1.0f, 0.96f, 0.9f));
+		Sun->SetCastShadows(false);
 	}
 
 	// Clear air: only a faint low haze; the sky atmosphere's aerial perspective handles real distance.

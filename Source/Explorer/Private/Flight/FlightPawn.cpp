@@ -34,8 +34,10 @@ void AFlightPawn::BeginPlay()
 	Super::BeginPlay();
 
 	FlightYaw = GetActorRotation().Yaw;
-	FlightPitch = FMath::Clamp(GetActorRotation().Pitch, -MaxPitch, MaxPitch);
+	FlightPitch = 0.0f;
 	SetActorRotation(FRotator(0.0f, FlightYaw, 0.0f));
+	const float Ground = FMath::Max(WorldGen::Height(GetActorLocation().X, GetActorLocation().Y), 0.0f);
+	TargetAltitude = FMath::Clamp(GetActorLocation().Z - Ground, MinGroundClearance, MaxAltitude);
 	CameraComponent->SetFieldOfView(FieldOfView);
 }
 
@@ -176,42 +178,49 @@ void AFlightPawn::Tick(float DeltaTime)
 	Steer.X = FMath::Clamp(Steer.X, -1.0f, 1.0f);
 	Steer.Y = FMath::Clamp(bInvertPitch ? -Steer.Y : Steer.Y, -1.0f, 1.0f);
 
-	// Heading: turn and pitch at a rate set by the stick; the nose drifts back to level when left alone.
+	// Heading: the stick turns; bank into the turn in proportion to the stick, level out when released.
 	FlightYaw = FRotator::NormalizeAxis(FlightYaw + Steer.X * TurnRate * DeltaTime);
-	FlightPitch = FMath::Clamp(FlightPitch + Steer.Y * PitchRate * DeltaTime, -MaxPitch, MaxPitch);
-	if (FMath::Abs(Steer.Y) < 0.05f)
-	{
-		FlightPitch = FMath::FInterpTo(FlightPitch, 0.0f, DeltaTime, AutoLevelRate);
-	}
-
-	// Bank into the turn in proportion to the stick; level out when it's released.
 	Bank = FMath::FInterpTo(Bank, Steer.X * MaxBankAngle, DeltaTime, BankResponse);
 
-	// Speed follows the trigger directly: released means stop and hover.
+	// Speed follows the trigger directly: released means stop and hover. Travel is level; height is
+	// handled by the altitude hold below.
 	Speed = MaxFlightSpeed * FMath::Pow(Throttle, ThrottleCurve);
-	const FVector Forward = FRotator(FlightPitch, FlightYaw, 0.0f).Vector();
-	FVector Velocity = Forward * Speed + FVector::UpVector * Rise * RiseSpeed;
+	FVector Velocity = FRotator(0.0f, FlightYaw, 0.0f).Vector() * Speed;
 
-	// Ground: never push you away, just ease a descent to a stop at a clearance that grows with speed,
-	// so a dive smoothly levels out and you glide along the surface. Looks ahead so rising ground
-	// starts the climb early. Only below the minimum clearance is there a gentle lift.
+	// Terrain-following altitude hold. The stick's up/down and the bumpers change the height held above
+	// the ground (faster when already high); the pawn then accelerates up or down to keep that height
+	// over the terrain ahead, so it rises over hills before reaching them and sinks into valleys.
 	const FVector Location = GetActorLocation();
 	const float Ground = FMath::Max(WorldGen::Height(Location.X, Location.Y), 0.0f);
-	float Floor = Ground;
-	const FVector Horizontal(Velocity.X, Velocity.Y, 0.0f);
-	for (const float Seconds : { 0.25f, 0.5f, 1.0f })
+	const float AltitudeInput = FMath::Clamp(Steer.Y + Rise, -1.0f, 1.0f);
+	TargetAltitude = FMath::Clamp(TargetAltitude + AltitudeInput * (AltitudeChangeRate + TargetAltitude * 0.8f) * DeltaTime, MinGroundClearance, MaxAltitude);
+
+	auto GroundAt = [&](float Seconds)
 	{
-		const FVector Ahead = Location + Horizontal * Seconds;
-		Floor = FMath::Max(Floor, FMath::Max(WorldGen::Height(Ahead.X, Ahead.Y), 0.0f));
-	}
-	const float Clearance = MinGroundClearance + Speed * ClearancePerSpeed;
-	const float Room = Location.Z - (Floor + Clearance);
-	const float MaxDescent = FMath::Max(Room, 0.0f) / GroundEaseTime;
-	Velocity.Z = FMath::Max(Velocity.Z, -MaxDescent);
-	if (Room < 0.0f)
+		const FVector P = Location + Velocity * Seconds;
+		return FMath::Max(WorldGen::Height(P.X, P.Y), 0.0f);
+	};
+	// Follow the ground just ahead, feeding forward its slope so hills are climbed as they arrive
+	// rather than after; and never let a crest further ahead come closer than half the held height.
+	const float Near = GroundAt(0.15f);
+	const float SlopeVZ = Speed > 10.0f ? (GroundAt(0.5f) - Near) / 0.35f : 0.0f;
+	float TargetZ = Near + TargetAltitude;
+	for (const float Seconds : { 0.3f, 0.6f })
 	{
-		Velocity.Z = FMath::Max(Velocity.Z, FMath::Min(-Room / GroundEaseTime, 3000.0f));
+		TargetZ = FMath::Max(TargetZ, GroundAt(Seconds) + MinGroundClearance);
 	}
+	const float MaxClimb = 1500.0f + Speed * 1.2f + TargetAltitude * 0.5f;
+	const float Accel = AltitudeAccel + Speed * 1.5f;
+	float DesiredVZ = FMath::Clamp(SlopeVZ + (TargetZ - Location.Z) * AltitudeStiffness, -MaxClimb, MaxClimb);
+	// Never descend faster than can be stopped before reaching the lowest allowed height.
+	const float Room = FMath::Max(Location.Z - (FMath::Max(Ground, Near) + MinGroundClearance), 0.0f);
+	DesiredVZ = FMath::Max(DesiredVZ, -FMath::Sqrt(2.0f * Accel * 0.7f * Room));
+	VerticalSpeed += FMath::Clamp(DesiredVZ - VerticalSpeed, -Accel * DeltaTime, Accel * DeltaTime);
+	Velocity.Z = VerticalSpeed;
+
+	// The nose follows the flight path a little, so climbs and descents are felt.
+	const float PathPitch = FMath::RadiansToDegrees(FMath::Atan2(VerticalSpeed, FMath::Max(Speed, 1500.0f)));
+	FlightPitch = FMath::FInterpTo(FlightPitch, FMath::Clamp(PathPitch * 0.6f, -25.0f, 25.0f), DeltaTime, 2.0f);
 
 	// Move, sliding along anything solid.
 	FHitResult Hit;
@@ -219,7 +228,20 @@ void AFlightPawn::Tick(float DeltaTime)
 	AddActorWorldOffset(Delta, true, &Hit);
 	if (Hit.bBlockingHit)
 	{
-		AddActorWorldOffset(FVector::VectorPlaneProject(Delta * (1.0f - Hit.Time), Hit.Normal), true);
+		VerticalSpeed *= FMath::Max(0.0f, 1.0f - FMath::Abs(Hit.Normal.Z));
+		const FVector Remaining = Delta * (1.0f - Hit.Time);
+		FVector Slide = FVector::VectorPlaneProject(Remaining, Hit.Normal);
+		// Head-on into a trunk or wall: veer round it rather than stopping dead.
+		if (Slide.SizeSquared() < Remaining.SizeSquared() * 0.25f)
+		{
+			FVector Around = FVector::CrossProduct(Hit.Normal, FVector::UpVector).GetSafeNormal();
+			if (FVector::DotProduct(Around, FRotator(0.0f, FlightYaw, 0.0f).RotateVector(FVector::RightVector)) < 0.0f)
+			{
+				Around = -Around;
+			}
+			Slide += Around * Remaining.Size() * 0.8f;
+		}
+		AddActorWorldOffset(Slide, true);
 	}
 	if (GetActorLocation().Z < Ground + 60.0f)
 	{

@@ -50,7 +50,7 @@ namespace
 
 	// Grass tiles align with the 5 m terrain grid so blades sit exactly on the rendered surface.
 	constexpr double GrassTileSize = 2000.0;
-	constexpr int32 GrassClumpsPerSide = 16;
+	constexpr int32 GrassClumpsPerSide = 12;
 
 	float Smooth(float Edge0, float Edge1, float X)
 	{
@@ -466,6 +466,24 @@ void ATerrainStreamer::Tick(float DeltaTime)
 		}
 	}
 
+	// Solid props only need physics right around the viewer; creating bodies for every trunk in the
+	// whole detail ring is what makes streaming slow.
+	for (TPair<FIntPoint, FChunk>& Pair : Chunks)
+	{
+		const bool bWant = (Pair.Key - Center).SizeSquared() <= CollisionRadius * CollisionRadius;
+		if (Pair.Value.bPropCollision != bWant)
+		{
+			for (int32 Part = 0; Part < Tree0; ++Part)
+			{
+				if (Part != Bush && Pair.Value.Parts[Part])
+				{
+					Pair.Value.Parts[Part]->SetCollisionEnabled(bWant ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+				}
+			}
+			Pair.Value.bPropCollision = bWant;
+		}
+	}
+
 	UpdateGrass(ViewLocation, Deadline);
 	UpdateFarTerrain(Center, Deadline);
 }
@@ -725,13 +743,22 @@ void ATerrainStreamer::BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstan
 	Component->ClearInstances();
 	if (Transforms.Num() > 0)
 	{
-		Component->AddInstances(Transforms, false, true);
-		for (int32 i = 0; i < Transforms.Num(); ++i)
-		{
-			Component->SetCustomData(i, TArrayView<const float>(&Data[i * 3], 3), false);
-		}
-		Component->MarkRenderStateDirty();
+		SetInstances(Component, Transforms, Data);
 	}
+}
+
+void ATerrainStreamer::SetInstances(UHierarchicalInstancedStaticMeshComponent* Component, const TArray<FTransform>& Transforms, const TArray<float>& CustomData)
+{
+	// Add all instances and write their custom data in one go, then build the culling tree once
+	// (per-instance SetCustomData calls each trigger work in the hierarchical component).
+	Component->ClearInstances();
+	Component->AddInstances(Transforms, false, true);
+	if (Component->PerInstanceSMCustomData.Num() == CustomData.Num())
+	{
+		FMemory::Memcpy(Component->PerInstanceSMCustomData.GetData(), CustomData.GetData(), CustomData.Num() * sizeof(float));
+	}
+	Component->BuildTreeIfOutdated(true, true);
+	Component->MarkRenderStateDirty();
 }
 
 void ATerrainStreamer::BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32 Step, bool bWithCollision)
@@ -914,21 +941,17 @@ void ATerrainStreamer::BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps 
 		{
 			Component = AcquirePart(static_cast<EPropPart>(Part));
 		}
-		Component->ClearInstances();
-		Component->AddInstances(Transforms, false, true);
-		const TArray<float>& Data = Batch.CustomData[Part];
-		for (int32 i = 0; i < Transforms.Num(); ++i)
-		{
-			Component->SetCustomData(i, TArrayView<const float>(&Data[i * 5], 5), false);
-		}
-		Component->MarkRenderStateDirty();
+		// Start without physics; Tick enables it if this chunk is close enough.
+		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		SetInstances(Component, Transforms, Batch.CustomData[Part]);
 	}
 	Chunk.Props = Level;
+	Chunk.bPropCollision = false;
 }
 
 void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) const
 {
-	constexpr double Cell = 1600.0;
+	constexpr double Cell = 1300.0;
 	const int32 CellsPerChunk = FMath::RoundToInt(ChunkWorldSize() / Cell);
 	const int32 FirstX = Coord.X * CellsPerChunk;
 	const int32 FirstY = Coord.Y * CellsPerChunk;
@@ -1216,20 +1239,88 @@ void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) co
 
 				const float W = House.Range(700.0f, 1100.0f);
 				const float D = House.Range(550.0f, 850.0f);
-				const float H = House.Range(450.0f, 650.0f);
+				const bool bTwoStorey = !bAdobe && House.Next() < 0.35f;
+				const float H = bTwoStorey ? House.Range(620.0f, 720.0f) : House.Range(360.0f, 420.0f);
 				FLinearColor Wall = Plaster[FMath::FloorToInt(House.Next() * 3) % 3];
 				ESurface WallSurface = House.Next() < 0.4f ? SurfBrick : SurfConcrete;
 				if (bTimber) { Wall = FLinearColor(0.5f, 0.36f, 0.25f); WallSurface = SurfConcrete; }
 				if (bAdobe) { Wall = FLinearColor(1.5f, 1.2f, 0.85f); WallSurface = SurfConcrete; }
 				if (WallSurface == SurfBrick) { Wall = White; }
-				Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H * 0.5f - 50.0f), FRotator(0, Yaw, 0), FVector(W, D, H), Jitter(Wall, House.Next(), 0.06f), 0.0f, WallSurface);
 
-				if (!bAdobe)
+				// Everything is laid out in the house's own frame: X along its length, Y across, Z up from the ground.
+				const FRotator Rot(0, Yaw, 0);
+				const FVector Base(Pos.X, Pos.Y, Ground);
+				auto Part = [&](EPropPart Shape, const FVector& Local, const FVector& Size, const FLinearColor& Color, ESurface Surface, float Roll = 0.0f)
 				{
-					// Pitched roof: a box turned 45 degrees about the ridge, its diagonal spanning the house.
-					const float S2 = D / UE_SQRT_2 + 40.0f;
+					Batch.Add(Shape, Base + Rot.RotateVector(Local), FRotator(0, Yaw, Roll), Size, Color, 0.0f, Surface);
+				};
+				const FLinearColor Stone(1.1f, 1.05f, 0.98f);
+				const FLinearColor Trim(1.8f, 1.8f, 1.75f);
+				const FLinearColor Glass(0.35f, 0.4f, 0.45f);
+				const FLinearColor Wood(0.45f, 0.3f, 0.2f);
+
+				// Stone plinth the house sits on (it also hides uneven ground), then the walls.
+				Part(Cube, FVector(0, 0, -20.0f), FVector(W + 40.0f, D + 40.0f, 110.0f), Stone, SurfRock);
+				Part(Cube, FVector(0, 0, H * 0.5f + 30.0f), FVector(W, D, H), Jitter(Wall, House.Next(), 0.06f), WallSurface);
+
+				// Framed windows on every wall, one row per storey; a panelled door on the front.
+				const int32 Storeys = bTwoStorey ? 2 : 1;
+				const int32 AlongLong = FMath::Max(2, FMath::FloorToInt(W / 280.0f));
+				const int32 AlongShort = FMath::Max(1, FMath::FloorToInt(D / 320.0f));
+				const int32 DoorSlot = AlongLong / 2;
+				auto Window = [&](const FVector& Center, bool bFacingY)
+				{
+					const FVector Out = bFacingY ? FVector(0, FMath::Sign(Center.Y), 0) : FVector(FMath::Sign(Center.X), 0, 0);
+					const FVector FrameSize = bFacingY ? FVector(125, 14, 150) : FVector(14, 125, 150);
+					const FVector GlassSize = bFacingY ? FVector(100, 16, 122) : FVector(16, 100, 122);
+					Part(Cube, Center + Out * 6.0f, FrameSize, bAdobe ? Wood : Trim, SurfConcrete);
+					Part(Cube, Center + Out * 9.0f, GlassSize, Glass, SurfGlass);
+					Part(Cube, Center + Out * 14.0f - FVector(0, 0, 80.0f), bFacingY ? FVector(140, 24, 12) : FVector(24, 140, 12), bAdobe ? Wood : Trim, SurfConcrete);
+				};
+				for (int32 Storey = 0; Storey < Storeys; ++Storey)
+				{
+					const float Z = 30.0f + (Storey + 0.55f) * H / Storeys;
+					for (const float Side : { -1.0f, 1.0f })
+					{
+						for (int32 k = 0; k < AlongLong; ++k)
+						{
+							if (Storey == 0 && Side > 0 && k == DoorSlot)
+							{
+								continue;
+							}
+							Window(FVector(-W * 0.5f + (k + 0.5f) * W / AlongLong, Side * D * 0.5f, Z), true);
+						}
+						for (int32 k = 0; k < AlongShort; ++k)
+						{
+							Window(FVector(Side * W * 0.5f, -D * 0.5f + (k + 0.5f) * D / AlongShort, Z), false);
+						}
+					}
+				}
+				const float DoorX = -W * 0.5f + (DoorSlot + 0.5f) * W / AlongLong;
+				Part(Cube, FVector(DoorX, D * 0.5f + 6.0f, 30.0f + 110.0f), FVector(120, 14, 230), bAdobe ? Wood : Trim, SurfConcrete);
+				Part(Cube, FVector(DoorX, D * 0.5f + 9.0f, 30.0f + 105.0f), FVector(96, 16, 210), Wood, SurfConcrete);
+				Part(Cube, FVector(DoorX, D * 0.5f + 60.0f, 20.0f), FVector(180, 110, 30), Stone, SurfRock);
+
+				if (bAdobe)
+				{
+					// Flat roof with a parapet and roof beams (vigas) poking out of the walls.
+					Part(Cube, FVector(0, 0, H + 30.0f + 25.0f), FVector(W + 20.0f, D + 20.0f, 50.0f), Jitter(Wall, House.Next(), 0.04f), SurfConcrete);
+					const int32 Vigas = FMath::FloorToInt(W / 160.0f);
+					for (int32 k = 0; k < Vigas; ++k)
+					{
+						Part(Cylinder, FVector(-W * 0.5f + (k + 0.5f) * W / Vigas, 0, H - 20.0f), FVector(22, D + 90.0f, 22), Wood, SurfConcrete, 90.0f);
+					}
+				}
+				else
+				{
+					// Pitched roof with overhanging eaves (a box turned 45 degrees about the ridge), plus a chimney.
+					const float S2 = D / UE_SQRT_2 + 70.0f;
 					const FLinearColor Roof = bTimber ? FLinearColor(0.55f, 0.55f, 0.58f) : Roofs[FMath::FloorToInt(House.Next() * 3) % 3];
-					Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H - 50.0f), FRotator(0, Yaw, 45), FVector(W + 60.0f, S2, S2), Roof, 0.0f, SurfSlate);
+					Part(Cube, FVector(0, 0, H + 30.0f), FVector(W + 100.0f, S2, S2), Roof, SurfSlate, 45.0f);
+					Part(Cube, FVector(0, 0, H + 30.0f), FVector(W + 10.0f, S2 - 20.0f, S2 - 20.0f), Jitter(Wall, House.Next(), 0.06f), WallSurface, 45.0f);
+					const float ChimneyX = (House.Next() < 0.5f ? -1.0f : 1.0f) * W * 0.3f;
+					Part(Cube, FVector(ChimneyX, D * 0.15f, H + 30.0f + D * 0.45f), FVector(70, 70, D * 0.6f), White, SurfBrick);
+					Part(Cube, FVector(ChimneyX, D * 0.15f, H + 30.0f + D * 0.75f), FVector(90, 90, 20), Stone, SurfRock);
 				}
 			}
 		}
@@ -1327,15 +1418,50 @@ void ATerrainStreamer::AddCities(const FIntPoint& Coord, FPropBatch& Batch) cons
 					}
 					const float H = FMath::Lerp(2500.0f, 20000.0f, Falloff * Falloff * Tower.Next());
 					const float W = Tower.Range(1800.0f, 3400.0f);
-					const bool bGlass = Tower.Next() < 0.45f;
-					const FLinearColor Facade = bGlass ? FLinearColor(0.8f, 0.9f, 1.0f) : Jitter(FLinearColor(1.25f, 1.2f, 1.12f), Tower.Next(), 0.15f);
+					const float Dp = W * Tower.Range(0.7f, 1.0f);
+					const int32 Style = FMath::FloorToInt(Tower.Next() * 3.0f); // 0 curtain glass, 1 ribbon windows, 2 masonry grid
+					const FLinearColor Concrete = Jitter(FLinearColor(1.25f, 1.2f, 1.12f), Tower.Next(), 0.15f);
+					const FLinearColor Glass = Style == 0 ? FLinearColor(0.55f, 0.7f, 0.85f) : FLinearColor(0.35f, 0.42f, 0.5f);
 					const FRotator Rot(0, Tower.Range(-4.0f, 4.0f), 0);
-					Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H * 0.5f - 200.0f), Rot, FVector(W, W * Tower.Range(0.7f, 1.0f), H), Facade, 0.0f, bGlass ? SurfGlass : SurfConcrete);
-					// Rooftop plant room.
-					Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H - 200.0f + 250.0f), Rot, FVector(W * 0.5f, W * 0.4f, 500.0f), FLinearColor(1.1f, 1.1f, 1.1f), 0.0f, SurfConcrete);
+					const FVector Base(Pos.X, Pos.Y, Ground - 200.0f);
+					auto Part = [&](EPropPart Shape, const FVector& Local, const FVector& Size, const FLinearColor& Color, ESurface Surface, float Glow = 0.0f)
+					{
+						Batch.Add(Shape, Base + Rot.RotateVector(Local), Rot, Size, Color, Glow, Surface);
+					};
+
+					// Podium: a wider two-storey base with a glazed shopfront band.
+					Part(Cube, FVector(0, 0, 450.0f), FVector(W + 600.0f, Dp + 600.0f, 900.0f), Concrete, SurfConcrete);
+					Part(Cube, FVector(0, 0, 420.0f), FVector(W + 620.0f, Dp + 620.0f, 380.0f), Glass, SurfGlass);
+
+					// Shaft: glass core with a floor slab (spandrel) band every storey; masonry adds vertical piers.
+					const float ShaftH = H - 900.0f;
+					Part(Cube, FVector(0, 0, 900.0f + ShaftH * 0.5f), FVector(W, Dp, ShaftH), Glass, SurfGlass);
+					constexpr float Floor = 380.0f;
+					const float Band = Style == 0 ? 35.0f : Style == 1 ? 140.0f : 110.0f;
+					for (float Z = 900.0f + Floor; Z < H - 150.0f; Z += Floor)
+					{
+						Part(Cube, FVector(0, 0, Z), FVector(W + 30.0f, Dp + 30.0f, Band), Style == 0 ? FLinearColor(0.3f, 0.32f, 0.35f) : Concrete, Style == 0 ? SurfGlass : SurfConcrete);
+					}
+					if (Style == 2)
+					{
+						const int32 Piers = FMath::Max(3, FMath::FloorToInt(W / 320.0f));
+						for (int32 k = 0; k <= Piers; ++k)
+						{
+							const float T = -0.5f + static_cast<float>(k) / Piers;
+							Part(Cube, FVector(T * W, 0, 900.0f + ShaftH * 0.5f), FVector(80, Dp + 36.0f, ShaftH), Concrete, SurfConcrete);
+							Part(Cube, FVector(0, T * Dp, 900.0f + ShaftH * 0.5f), FVector(W + 36.0f, 80, ShaftH), Concrete, SurfConcrete);
+						}
+					}
+
+					// Parapet, plant rooms, water tank and an aircraft warning light on the tallest.
+					Part(Cube, FVector(0, 0, H + 60.0f), FVector(W + 40.0f, Dp + 40.0f, 120.0f), Concrete, SurfConcrete);
+					Part(Cube, FVector(W * 0.12f, Dp * 0.1f, H + 300.0f), FVector(W * 0.45f, Dp * 0.35f, 480.0f), Concrete, SurfConcrete);
+					Part(Cube, FVector(-W * 0.25f, -Dp * 0.2f, H + 180.0f), FVector(W * 0.2f, Dp * 0.25f, 240.0f), FLinearColor(0.9f, 0.9f, 0.92f), SurfConcrete);
+					Part(Cylinder, FVector(W * 0.3f, -Dp * 0.25f, H + 260.0f), FVector(260, 260, 400), FLinearColor(0.6f, 0.45f, 0.35f), SurfConcrete);
 					if (H > 12000.0f)
 					{
-						Batch.Add(Sphere, FVector(Pos.X, Pos.Y, Ground + H + 350.0f), FRotator::ZeroRotator, FVector(120, 120, 120), FLinearColor(1.0f, 0.1f, 0.05f), 40.0f, SurfGlass);
+						Part(Cylinder, FVector(0, 0, H + 900.0f), FVector(30, 30, 1200), FLinearColor(0.8f, 0.8f, 0.8f), SurfConcrete);
+						Part(Sphere, FVector(0, 0, H + 1520.0f), FVector(90, 90, 90), FLinearColor(1.0f, 0.1f, 0.05f), SurfGlass, 40.0f);
 					}
 				}
 			}
@@ -1466,7 +1592,7 @@ UHierarchicalInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPa
 		else
 		{
 			Component->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
-			Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		}
 		if (Part == Trunk)
 		{

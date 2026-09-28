@@ -119,7 +119,7 @@ def distance_dissolve(g, start_cm, end_cm, mask=None, mask_out=""):
 
 
 # Vegetation (built within ~1.6 km) dissolves over this band so the edge is never seen popping.
-VEG_FADE = (80000.0, 125000.0)
+VEG_FADE = (60000.0, 88000.0)
 
 
 def finish(mat):
@@ -315,14 +315,16 @@ m = new_material("M_Grass")
 m.set_editor_property("used_with_instanced_static_meshes", True)
 m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_TWO_SIDED_FOLIAGE)
 m.set_editor_property("two_sided", True)
-m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
 g = Graph(m)
-lib.connect_material_property(distance_dissolve(g, 7000.0, 11500.0), "", MP.MP_OPACITY_MASK)
 cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
 tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
 vc = g.node(unreal.MaterialExpressionVertexColor)
 height = g.mask(vc, r=True)
 blade = g.mul(g.lerp(g.color(0.02, 0.045, 0.01), g.color(0.13, 0.21, 0.045), height), tint)
+# Blend towards a flat ground-like tone with distance so the edge of the grass field isn't noticed
+# (grass stays opaque: masked grass is far too expensive at this density).
+far = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.node(unreal.MaterialExpressionPixelDepth), g.const(6000.0)), g.const(1.0 / 5000.0)))
+blade = g.lerp(blade, g.mul(g.color(0.07, 0.11, 0.03), tint), far)
 lib.connect_material_property(blade, "", MP.MP_BASE_COLOR)
 lib.connect_material_property(g.mul(blade, g.color(0.9, 1.2, 0.5)), "", MP.MP_SUBSURFACE_COLOR)
 lib.connect_material_property(g.const(0.6), "", MP.MP_ROUGHNESS)
