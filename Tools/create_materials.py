@@ -154,16 +154,29 @@ noise_xy, _, _ = g.world_uvs(4700.0)
 blend = g.mask(g.sample(tex("T_Perlin_Noise_M"), noise_xy), r=True)
 grass = g.lerp(g.sample(tex("T_Ground_Grass_D"), near_xy), g.sample(tex("T_Ground_Grass_D"), swapped_xy), blend)
 grass = g.lerp(grass, g.sample(tex("T_Ground_Grass_D"), far_xy), g.const(0.3))
+# Tone the bright, fuzzy texture down to a natural meadow floor, and let patches of bare soil show
+# through (the 3D blades on top carry the look of grass up close).
+grass = g.mul(grass, g.color(0.78, 0.88, 0.66))
+soil_xy, _, _ = g.world_uvs(380.0)
+# Soil and litter use only the gravel texture's brightness pattern (its own colour is orange).
+soil = g.mul(g.mask(g.sample(tex("T_Ground_Gravel_D"), soil_xy), g=True), g.color(0.36, 0.28, 0.19))
+patch_xy, _, _ = g.world_uvs(1300.0)
+patches = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mask(g.sample(tex("T_Perlin_Noise_M"), patch_xy), r=True), g.const(0.45)), g.const(2.5)))
+grass = g.lerp(grass, soil, g.mul(patches, g.const(0.3)))
 depth = g.node(unreal.MaterialExpressionPixelDepth)
 fade = g.saturate(g.mul(depth, g.const(1.0 / 25000.0)))
-grass = g.lerp(grass, g.color(0.1, 0.16, 0.045), g.mul(fade, g.const(0.85)))
+grass = g.lerp(grass, g.color(0.085, 0.11, 0.045), g.mul(fade, g.const(0.85)))
 dry_grass = g.mul(grass, g.color(1.45, 1.12, 0.5))
 color = g.lerp(grass, dry_grass, dryness)
 
+# Forest floor: brown leaf litter and earth with only a little moss.
 moss_xy, _, _ = g.world_uvs(420.0)
-moss = g.mul(g.sample(tex("T_ground_Moss_D"), moss_xy), g.color(0.75, 0.85, 0.7))
-moss = g.lerp(moss, g.color(0.05, 0.09, 0.03), g.mul(fade, g.const(0.8)))
-color = g.lerp(color, moss, vc, "A")
+# Dark, damp earth with decaying leaves, broken by mossy patches.
+litter = g.mul(g.mask(g.sample(tex("T_Ground_Gravel_D"), moss_xy), g=True), g.color(0.2, 0.15, 0.1))
+litter = g.lerp(litter, g.mul(g.sample(tex("T_ground_Moss_D"), moss_xy), g.color(0.3, 0.36, 0.22)), g.const(0.35))
+litter = g.lerp(litter, g.mul(grass, g.const(0.7)), g.mul(patches, g.const(0.5)))
+litter = g.lerp(litter, g.color(0.06, 0.07, 0.035), g.mul(fade, g.const(0.8)))
+color = g.lerp(color, litter, vc, "A")
 
 sand_xy, _, _ = g.world_uvs(300.0)
 gravel = g.sample(tex("T_Ground_Gravel_D"), sand_xy)
@@ -265,47 +278,111 @@ finish(m)
 
 # ---------------------------------------------------------------------------------------------
 # Foliage: scanned bush leaves, two-sided with light passing through. Custom data [0..2] tint.
-m = new_material("M_Foliage")
-m.set_editor_property("used_with_instanced_static_meshes", True)
+def make_foliage(name, fade):
+    """Foliage; fade=None never dissolves with distance (used on floating islands)."""
+    m = new_material(name)
+    m.set_editor_property("used_with_instanced_static_meshes", True)
+    m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+    m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_TWO_SIDED_FOLIAGE)
+    m.set_editor_property("two_sided", True)
+    g = Graph(m)
+    cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
+    tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
+    mesh_uv = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=0)
+    leaves = g.sample(tex("T_Bush_D"), mesh_uv)
+    color = g.mul(leaves, tint)
+    lib.connect_material_property(color, "", MP.MP_BASE_COLOR)
+    if fade:
+        lib.connect_material_property(distance_dissolve(g, *fade, leaves, "A"), "", MP.MP_OPACITY_MASK)
+    else:
+        lib.connect_material_property(leaves, "A", MP.MP_OPACITY_MASK)
+    lib.connect_material_property(g.sample(tex("T_Bush_N"), mesh_uv, normal=True), "", MP.MP_NORMAL)
+    lib.connect_material_property(g.mul(color, g.color(0.6, 0.8, 0.3)), "", MP.MP_SUBSURFACE_COLOR)
+    lib.connect_material_property(g.const(0.75), "", MP.MP_ROUGHNESS)
+    finish(m)
+
+
+make_foliage("M_Foliage", VEG_FADE)
+make_foliage("M_FoliageFar", None)
+
+# ---------------------------------------------------------------------------------------------
+# Roads and trails (runtime path strips). Vertex colour R: 1 = gravel road, 0 = dirt trail.
+# UV0.x runs across the path (0..1): edges are ragged and blend out, with a worn centre.
+m = new_material("M_Path")
 m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
-m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_TWO_SIDED_FOLIAGE)
 m.set_editor_property("two_sided", True)
 g = Graph(m)
-cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
-tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
-mesh_uv = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=0)
-leaves = g.sample(tex("T_Bush_D"), mesh_uv)
-color = g.mul(leaves, tint)
+vc = g.node(unreal.MaterialExpressionVertexColor)
+uv = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=0)
+across = g.mask(uv, r=True)
+edge = g.op(unreal.MaterialExpressionSubtract, g.const(1.0), g.link(g.op(unreal.MaterialExpressionSubtract, g.mul(across, g.const(2.0)), g.const(1.0)), g.node(unreal.MaterialExpressionAbs)))
+path_xy, _, _ = g.world_uvs(260.0)
+rough_edge_xy, _, _ = g.world_uvs(140.0)
+ragged = g.mask(g.sample(tex("T_Perlin_Noise_M"), rough_edge_xy), r=True)
+keep = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(edge, g.const(3.0)), g.mul(ragged, g.const(1.2))), g.const(3.0)))
+gravel = g.sample(tex("T_Ground_Gravel_D"), path_xy)
+road = g.mul(gravel, g.color(0.62, 0.56, 0.47))
+trail = g.mul(gravel, g.color(0.33, 0.24, 0.16))
+color = g.lerp(trail, road, vc, "R")
+# Wheel ruts / foot-worn centre slightly darker and smoother.
+worn = g.saturate(g.mul(edge, g.const(1.6)))
+color = g.lerp(color, g.mul(color, g.const(0.82)), g.mul(worn, g.const(0.5)))
 lib.connect_material_property(color, "", MP.MP_BASE_COLOR)
-lib.connect_material_property(distance_dissolve(g, *VEG_FADE, leaves, "A"), "", MP.MP_OPACITY_MASK)
-lib.connect_material_property(g.sample(tex("T_Bush_N"), mesh_uv, normal=True), "", MP.MP_NORMAL)
-lib.connect_material_property(g.mul(color, g.color(0.6, 0.8, 0.3)), "", MP.MP_SUBSURFACE_COLOR)
-lib.connect_material_property(g.const(0.75), "", MP.MP_ROUGHNESS)
+lib.connect_material_property(g.sample(tex("T_Ground_Gravel_N"), path_xy, normal=True), "", MP.MP_NORMAL)
+lib.connect_material_property(g.const(0.9), "", MP.MP_ROUGHNESS)
+lib.connect_material_property(distance_dissolve(g, 95000.0, 130000.0, keep), "", MP.MP_OPACITY_MASK)
 finish(m)
 
 # ---------------------------------------------------------------------------------------------
 # Bark for runtime-built tree meshes: UV U runs around the trunk, V along it (1 per 1.5 m).
 # Noise stretched along the trunk gives vertical furrows. Custom data [0..2] tint.
-m = new_material("M_Bark")
+def make_bark(name, fade):
+    m = new_material(name)
+    m.set_editor_property("used_with_instanced_static_meshes", True)
+    m.set_editor_property("two_sided", True)
+    g = Graph(m)
+    if fade:
+        m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+        lib.connect_material_property(distance_dissolve(g, *fade), "", MP.MP_OPACITY_MASK)
+    cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
+    tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
+    uv = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=0)
+    furrow_uv = g.mul(uv, g.op(unreal.MaterialExpressionAppendVector, g.const(3.0), g.const(0.35)))
+    ridge_uv = g.mul(uv, g.op(unreal.MaterialExpressionAppendVector, g.const(7.0), g.const(0.9)))
+    furrow = g.mask(g.sample(tex("T_Perlin_Noise_M"), furrow_uv), r=True)
+    ridge = g.mask(g.sample(tex("T_Perlin_Noise_M"), ridge_uv), r=True)
+    relief = g.saturate(g.mul(g.mul(furrow, ridge), g.const(2.6)))
+    bark = g.lerp(g.color(0.03, 0.024, 0.018), g.color(0.17, 0.14, 0.11), relief)
+    lib.connect_material_property(g.mul(bark, tint), "", MP.MP_BASE_COLOR)
+    normal_uv = g.mul(uv, g.op(unreal.MaterialExpressionAppendVector, g.const(2.0), g.const(0.5)))
+    lib.connect_material_property(g.sample(tex("T_Detail_Rocky_N"), normal_uv, normal=True), "", MP.MP_NORMAL)
+    lib.connect_material_property(g.const(0.92), "", MP.MP_ROUGHNESS)
+    lib.connect_material_property(g.const(0.2), "", MP.MP_SPECULAR)
+    finish(m)
+
+
+make_bark("M_Bark", VEG_FADE)
+make_bark("M_BarkFar", None)
+
+# ---------------------------------------------------------------------------------------------
+# Floating islands (runtime meshes, world-projected textures). Vertex colour: R earth (0 grassy top,
+# 1 hanging soil underneath), G exposed rock, B depth down the underside (0 rim .. 1 tip).
+m = new_material("M_Island")
 m.set_editor_property("used_with_instanced_static_meshes", True)
 m.set_editor_property("two_sided", True)
-m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
 g = Graph(m)
-lib.connect_material_property(distance_dissolve(g, *VEG_FADE), "", MP.MP_OPACITY_MASK)
-cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
-tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
-uv = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=0)
-furrow_uv = g.mul(uv, g.op(unreal.MaterialExpressionAppendVector, g.const(3.0), g.const(0.35)))
-ridge_uv = g.mul(uv, g.op(unreal.MaterialExpressionAppendVector, g.const(7.0), g.const(0.9)))
-furrow = g.mask(g.sample(tex("T_Perlin_Noise_M"), furrow_uv), r=True)
-ridge = g.mask(g.sample(tex("T_Perlin_Noise_M"), ridge_uv), r=True)
-relief = g.saturate(g.mul(g.mul(furrow, ridge), g.const(2.6)))
-bark = g.lerp(g.color(0.03, 0.024, 0.018), g.color(0.17, 0.14, 0.11), relief)
-lib.connect_material_property(g.mul(bark, tint), "", MP.MP_BASE_COLOR)
-normal_uv = g.mul(uv, g.op(unreal.MaterialExpressionAppendVector, g.const(2.0), g.const(0.5)))
-lib.connect_material_property(g.sample(tex("T_Detail_Rocky_N"), normal_uv, normal=True), "", MP.MP_NORMAL)
-lib.connect_material_property(g.const(0.92), "", MP.MP_ROUGHNESS)
-lib.connect_material_property(g.const(0.2), "", MP.MP_SPECULAR)
+vc = g.node(unreal.MaterialExpressionVertexColor)
+weights = g.normal_weights()
+top_xy, _, _ = g.world_uvs(450.0)
+grass = g.mul(g.sample(tex("T_Ground_Grass_D"), top_xy), g.color(0.78, 0.88, 0.66))
+soil = g.mul(g.mask(g.triplanar(tex("T_Ground_Gravel_D"), 350.0, weights), g=True), g.color(0.42, 0.31, 0.2))
+# Deeper soil is darker and damper.
+soil = g.lerp(soil, g.mul(soil, g.const(0.75)), vc, "B")
+rock = g.mul(g.triplanar(tex("T_Rock_Slate_D"), 900.0, weights), g.color(0.9, 0.85, 0.8))
+earth = g.lerp(soil, rock, vc, "G")
+color = g.lerp(grass, earth, vc, "R")
+lib.connect_material_property(color, "", MP.MP_BASE_COLOR)
+lib.connect_material_property(g.lerp(g.const(0.95), g.const(0.85), vc, "G"), "", MP.MP_ROUGHNESS)
 finish(m)
 
 # ---------------------------------------------------------------------------------------------
@@ -320,7 +397,7 @@ cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i
 tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
 vc = g.node(unreal.MaterialExpressionVertexColor)
 height = g.mask(vc, r=True)
-blade = g.mul(g.lerp(g.color(0.02, 0.045, 0.01), g.color(0.13, 0.21, 0.045), height), tint)
+blade = g.mul(g.lerp(g.color(0.025, 0.04, 0.015), g.color(0.15, 0.19, 0.075), height), tint)
 # Blend towards a flat ground-like tone with distance so the edge of the grass field isn't noticed
 # (grass stays opaque: masked grass is far too expensive at this density).
 far = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.node(unreal.MaterialExpressionPixelDepth), g.const(6000.0)), g.const(1.0 / 5000.0)))

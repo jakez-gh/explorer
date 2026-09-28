@@ -185,42 +185,61 @@ void AFlightPawn::Tick(float DeltaTime)
 	// Speed follows the trigger directly: released means stop and hover. Travel is level; height is
 	// handled by the altitude hold below.
 	Speed = MaxFlightSpeed * FMath::Pow(Throttle, ThrottleCurve);
-	FVector Velocity = FRotator(0.0f, FlightYaw, 0.0f).Vector() * Speed;
+	// Pitch: the stick tilts the nose and you fly where it points. Released, the nose eases back to level
+	// and gentle terrain following takes over from whatever height you're at.
+	const bool bPitching = FMath::Abs(Steer.Y) > 0.05f;
+	if (bPitching)
+	{
+		FlightPitch = FMath::Clamp(FlightPitch + Steer.Y * PitchRate * DeltaTime, -MaxPitch, MaxPitch);
+	}
+	else
+	{
+		FlightPitch = FMath::FInterpTo(FlightPitch, 0.0f, DeltaTime, AutoLevelRate);
+	}
+	const float PitchRad = FMath::DegreesToRadians(FlightPitch);
+	FVector Velocity = FRotator(0.0f, FlightYaw, 0.0f).Vector() * Speed * FMath::Cos(PitchRad);
 
-	// Terrain-following altitude hold. The stick's up/down and the bumpers change the height held above
-	// the ground (faster when already high); the pawn then accelerates up or down to keep that height
-	// over the terrain ahead, so it rises over hills before reaching them and sinks into valleys.
 	const FVector Location = GetActorLocation();
 	const float Ground = FMath::Max(WorldGen::Height(Location.X, Location.Y), 0.0f);
-	const float AltitudeInput = FMath::Clamp(Steer.Y + Rise, -1.0f, 1.0f);
-	TargetAltitude = FMath::Clamp(TargetAltitude + AltitudeInput * (AltitudeChangeRate + TargetAltitude * 0.8f) * DeltaTime, MinGroundClearance, MaxAltitude);
+	const float Altitude = Location.Z - Ground;
 
 	auto GroundAt = [&](float Seconds)
 	{
 		const FVector P = Location + Velocity * Seconds;
 		return FMath::Max(WorldGen::Height(P.X, P.Y), 0.0f);
 	};
-	// Follow the ground just ahead, feeding forward its slope so hills are climbed as they arrive
-	// rather than after; and never let a crest further ahead come closer than half the held height.
 	const float Near = GroundAt(0.15f);
-	const float SlopeVZ = Speed > 10.0f ? (GroundAt(0.5f) - Near) / 0.35f : 0.0f;
-	float TargetZ = Near + TargetAltitude;
-	for (const float Seconds : { 0.3f, 0.6f })
+	const float SlopeVZ = Speed > 10.0f ? (GroundAt(0.6f) - Near) / 0.45f : 0.0f;
+	const float Accel = AltitudeAccel;
+
+	// Climb or dive along the nose, plus the bumpers (which also work when hovering).
+	const float NoseVZ = Speed * FMath::Sin(PitchRad) + Rise * RiseSpeed;
+	float DesiredVZ;
+	if (bPitching || FMath::Abs(Rise) > 0.05f || FMath::Abs(FlightPitch) > 3.0f)
 	{
-		TargetZ = FMath::Max(TargetZ, GroundAt(Seconds) + MinGroundClearance);
+		DesiredVZ = NoseVZ;
+		TargetAltitude = FMath::Clamp(Altitude, MinGroundClearance, MaxAltitude);
 	}
-	const float MaxClimb = 1500.0f + Speed * 1.2f + TargetAltitude * 0.5f;
-	const float Accel = AltitudeAccel + Speed * 1.5f;
-	float DesiredVZ = FMath::Clamp(SlopeVZ + (TargetZ - Location.Z) * AltitudeStiffness, -MaxClimb, MaxClimb);
+	else
+	{
+		// Part of the ground's slope, plus a soft pull back towards the cruising height; both capped so the
+		// motivation up or down is always gentle.
+		const float Follow = FMath::Clamp(SlopeVZ * TerrainFollow, -MaxFollowSpeed, MaxFollowSpeed);
+		const float Pull = FMath::Clamp((Near + TargetAltitude - Location.Z) * AltitudeStiffness, -MaxCorrectionSpeed, MaxCorrectionSpeed);
+		DesiredVZ = Follow + Pull;
+		// Keep off crests just ahead, with the same limit.
+		for (const float Seconds : { 0.4f, 0.8f })
+		{
+			DesiredVZ = FMath::Max(DesiredVZ, FMath::Min((GroundAt(Seconds) + MinGroundClearance - Location.Z) / Seconds, MaxFollowSpeed + MaxCorrectionSpeed));
+		}
+	}
 	// Never descend faster than can be stopped before reaching the lowest allowed height.
 	const float Room = FMath::Max(Location.Z - (FMath::Max(Ground, Near) + MinGroundClearance), 0.0f);
 	DesiredVZ = FMath::Max(DesiredVZ, -FMath::Sqrt(2.0f * Accel * 0.7f * Room));
-	VerticalSpeed += FMath::Clamp(DesiredVZ - VerticalSpeed, -Accel * DeltaTime, Accel * DeltaTime);
+	// Nose-driven climbs and dives respond immediately; terrain following eases in gently.
+	const float Response = (bPitching || FMath::Abs(Rise) > 0.05f) ? Accel * 4.0f : Accel;
+	VerticalSpeed += FMath::Clamp(DesiredVZ - VerticalSpeed, -Response * DeltaTime, Response * DeltaTime);
 	Velocity.Z = VerticalSpeed;
-
-	// The nose follows the flight path a little, so climbs and descents are felt.
-	const float PathPitch = FMath::RadiansToDegrees(FMath::Atan2(VerticalSpeed, FMath::Max(Speed, 1500.0f)));
-	FlightPitch = FMath::FInterpTo(FlightPitch, FMath::Clamp(PathPitch * 0.6f, -25.0f, 25.0f), DeltaTime, 2.0f);
 
 	// Move, sliding along anything solid.
 	FHitResult Hit;
@@ -245,7 +264,9 @@ void AFlightPawn::Tick(float DeltaTime)
 	}
 	if (GetActorLocation().Z < Ground + 60.0f)
 	{
+		// Touching the ground: skim along it, never rebound.
 		SetActorLocation(FVector(GetActorLocation().X, GetActorLocation().Y, Ground + 60.0f));
+		VerticalSpeed = FMath::Max(VerticalSpeed, 0.0f);
 	}
 	SetActorRotation(FRotator(0.0f, FlightYaw, 0.0f));
 

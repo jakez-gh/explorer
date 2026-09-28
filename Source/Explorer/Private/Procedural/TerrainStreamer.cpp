@@ -34,7 +34,7 @@ namespace
 	constexpr double VillageCell = 250000.0;
 	constexpr double VillageRadius = 20000.0;
 	constexpr double CityCell = 900000.0;
-	constexpr double CityRadius = 45000.0;
+	constexpr double CityRadius = 70000.0;
 	constexpr double IslandCell = 900000.0;
 	constexpr double LighthouseCell = 500000.0;
 	constexpr double StoneCircleCell = 400000.0;
@@ -50,7 +50,7 @@ namespace
 
 	// Grass tiles align with the 5 m terrain grid so blades sit exactly on the rendered surface.
 	constexpr double GrassTileSize = 2000.0;
-	constexpr int32 GrassClumpsPerSide = 12;
+	constexpr int32 GrassClumpsPerSide = 16;
 
 	float Smooth(float Edge0, float Edge1, float X)
 	{
@@ -101,6 +101,7 @@ namespace
 		TVertexInstanceAttributesRef<float> Signs;
 		TVertexInstanceAttributesRef<FVector4f> Colors;
 		TVertexInstanceAttributesRef<FVector2f> UVs;
+		FVector4f Color = FVector4f(0, 0, 0, 1);
 
 		void Tube(const TArray<FVector3f>& Points, const TArray<float>& Radii, int32 Sides)
 		{
@@ -136,7 +137,7 @@ namespace
 					Normals[Instance] = Dir;
 					Tangents[Instance] = Along;
 					Signs[Instance] = 1.0f;
-					Colors[Instance] = FVector4f(0, 0, 0, 1);
+					Colors[Instance] = Color;
 					UVs.Set(Instance, 0, FVector2f(2.0f * K / Sides, V));
 					Ring.Add(Instance);
 				}
@@ -176,6 +177,8 @@ ATerrainStreamer::ATerrainStreamer()
 	TerrainMaterial = TerrainMat.Object;
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BarkMat(TEXT("/Game/Explorer/Materials/M_Bark.M_Bark"));
 	BarkMaterial = BarkMat.Object;
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PathMat(TEXT("/Game/Explorer/Materials/M_Path.M_Path"));
+	PathMaterial = PathMat.Object;
 	PartMeshes = { CylinderMesh.Object, ConeMesh.Object, SphereMesh.Object, CubeMesh.Object, RockMesh.Object, BushMesh.Object, CylinderMesh.Object };
 	PartMaterials = { PropMat.Object, PropMat.Object, PropMat.Object, PropMat.Object, RockMat.Object, FoliageMat.Object, PropMat.Object };
 	// Tree meshes are generated in BeginPlay.
@@ -184,6 +187,16 @@ ATerrainStreamer::ATerrainStreamer()
 	for (int32 Part = Tree0; Part < NumParts; ++Part)
 	{
 		PartMaterials[Part] = BarkMaterial;
+	}
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> IslandMat(TEXT("/Game/Explorer/Materials/M_Island.M_Island"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BarkFarMat(TEXT("/Game/Explorer/Materials/M_BarkFar.M_BarkFar"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FoliageFarMat(TEXT("/Game/Explorer/Materials/M_FoliageFar.M_FoliageFar"));
+	PartMeshes[IslandBush] = BushMesh.Object;
+	PartMaterials[IslandBush] = FoliageFarMat.Object;
+	PartMaterials[IslandTree] = BarkFarMat.Object;
+	for (int32 Part = Island0; Part < Island0 + NumIslandVariants; ++Part)
+	{
+		PartMaterials[Part] = IslandMat.Object;
 	}
 
 	Ocean = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Ocean"));
@@ -226,6 +239,173 @@ void ATerrainStreamer::BeginPlay()
 	{
 		PartMeshes[Tree0 + Variant] = CreateTreeMesh(static_cast<ETreeVariant>(Variant), TreeTemplates[Variant]);
 	}
+	PartMeshes[IslandTree] = PartMeshes[Tree0 + TreeBroadleafA];
+	for (int32 Variant = 0; Variant < NumIslandVariants; ++Variant)
+	{
+		PartMeshes[Island0 + Variant] = CreateIslandMesh(Variant);
+	}
+}
+
+float ATerrainStreamer::IslandTopHeight(int32 Variant, float X, float Y)
+{
+	// Rolling lumps, a raised knoll off-centre, and a rim that rounds off at the edge.
+	const FVector2D Offset(Variant * 17.3f, Variant * -9.1f);
+	const float R = FMath::Sqrt(X * X + Y * Y) / 100.0f;
+	const float Lumps = FMath::PerlinNoise2D(FVector2D(X, Y) / 45.0f + Offset) * 4.0f + FMath::PerlinNoise2D(FVector2D(X, Y) / 14.0f + Offset * 2.0f) * 1.2f;
+	const FVector2D Knoll(FMath::Cos(Variant * 2.1f) * 35.0f, FMath::Sin(Variant * 2.1f) * 35.0f);
+	const float Hill = 9.0f * FMath::Exp(-FVector2D::DistSquared(FVector2D(X, Y), Knoll) / 900.0f);
+	const float Rim = -6.0f * FMath::Pow(FMath::Clamp(R, 0.0f, 1.0f), 4.0f);
+	return Lumps + Hill + Rim;
+}
+
+UStaticMesh* ATerrainStreamer::CreateIslandMesh(int32 Variant)
+{
+	FMeshDescription Description;
+	FStaticMeshAttributes Attributes(Description);
+	Attributes.Register();
+	TVertexAttributesRef<FVector3f> Positions = Attributes.GetVertexPositions();
+	TVertexInstanceAttributesRef<FVector3f> Normals = Attributes.GetVertexInstanceNormals();
+	TVertexInstanceAttributesRef<FVector3f> Tangents = Attributes.GetVertexInstanceTangents();
+	TVertexInstanceAttributesRef<float> Signs = Attributes.GetVertexInstanceBinormalSigns();
+	TVertexInstanceAttributesRef<FVector4f> Colors = Attributes.GetVertexInstanceColors();
+	TVertexInstanceAttributesRef<FVector2f> UVs = Attributes.GetVertexInstanceUVs();
+	UVs.SetNumChannels(1);
+	const FPolygonGroupID Group = Description.CreatePolygonGroup();
+	Attributes.GetPolygonGroupMaterialSlotNames()[Group] = TEXT("Island");
+
+	// A polar grid: rings from the centre of the top out to the rim, then down the underside to the tip.
+	constexpr int32 Segments = 72;
+	constexpr int32 TopRings = 14;
+	constexpr int32 UnderRings = 22;
+	const FVector2D Offset(Variant * 11.7f, Variant * 5.3f);
+	const float Depth = 45.0f + Variant * 6.0f;
+	auto EdgeRadius = [&](float Angle)
+	{
+		// Irregular outline, not a circle.
+		return 100.0f * (1.0f + 0.16f * FMath::PerlinNoise1D(Angle * 1.3f + Variant * 3.0f) + 0.06f * FMath::PerlinNoise1D(Angle * 5.0f + Variant));
+	};
+
+	// Vertex colour: R = earth (0 grass, 1 hanging soil), G = exposed rock, B = height along underside.
+	struct FRing { TArray<FVector3f> P; TArray<FVector4f> C; };
+	TArray<FRing> Rings;
+	for (int32 i = 0; i <= TopRings; ++i)
+	{
+		FRing& Ring = Rings.AddDefaulted_GetRef();
+		const float T = static_cast<float>(i) / TopRings;
+		for (int32 s = 0; s <= Segments; ++s)
+		{
+			const float A = 2.0f * PI * s / Segments;
+			const float R = EdgeRadius(A) * T;
+			const float X = FMath::Cos(A) * R, Y = FMath::Sin(A) * R;
+			const float Outcrop = FMath::Max(0.0f, FMath::PerlinNoise2D(FVector2D(X, Y) / 20.0f + Offset * 3.0f) - 0.35f);
+			Ring.P.Add(FVector3f(X, Y, IslandTopHeight(Variant, X, Y) + Outcrop * 12.0f));
+			Ring.C.Add(FVector4f(FMath::Pow(T, 12.0f) * 0.8f, FMath::Clamp(Outcrop * 4.0f, 0.0f, 1.0f), 0.0f, 1.0f));
+		}
+	}
+	for (int32 i = 1; i <= UnderRings; ++i)
+	{
+		FRing& Ring = Rings.AddDefaulted_GetRef();
+		const float T = static_cast<float>(i) / UnderRings; // 0 at the rim, 1 at the tip
+		for (int32 s = 0; s <= Segments; ++s)
+		{
+			const float A = 2.0f * PI * s / Segments;
+			// A broad, bulging body of earth that stays wide, then gathers into several hanging lobes of
+			// soil, roots and rock, rather than a single cone.
+			// A broad, shallow bowl of earth; separate hanging lobes are added below it.
+			const float Taper = FMath::Pow(1.0f - T, 0.4f);
+			const float Bulge = 1.0f + 0.1f * FMath::Sin(T * PI) + 0.12f * FMath::PerlinNoise2D(FVector2D(A * 2.0f, T * 4.0f) + Offset);
+			const float R = EdgeRadius(A) * Taper * Bulge * (i == 1 ? 0.97f : 1.0f);
+			const float Z = -Depth * FMath::Pow(T, 0.8f) * (1.0f + 0.25f * FMath::PerlinNoise2D(FVector2D(A * 3.0f, T * 3.0f) - Offset)) - 4.0f * FMath::Pow(1.0f - T, 3.0f);
+			const float Rock = FMath::Clamp(FMath::PerlinNoise2D(FVector2D(A * 3.0f, T * 6.0f) + Offset * 2.0f) * 2.0f + T - 0.4f, 0.0f, 1.0f);
+			Ring.P.Add(FVector3f(FMath::Cos(A) * R, FMath::Sin(A) * R, Z));
+			Ring.C.Add(FVector4f(1.0f, Rock, T, 1.0f));
+		}
+	}
+
+	// Vertices, with normals from neighbouring points on the grid.
+	TArray<TArray<FVertexInstanceID>> Ids;
+	for (int32 i = 0; i < Rings.Num(); ++i)
+	{
+		TArray<FVertexInstanceID>& Row = Ids.AddDefaulted_GetRef();
+		for (int32 s = 0; s <= Segments; ++s)
+		{
+			const FVector3f& P = Rings[i].P[s];
+			const FVector3f Across = Rings[i].P[(s + 1) % Segments] - Rings[i].P[(s + Segments - 1) % Segments];
+			const FVector3f Along = Rings[FMath::Min(i + 1, Rings.Num() - 1)].P[s] - Rings[FMath::Max(i - 1, 0)].P[s];
+			FVector3f N = FVector3f::CrossProduct(Across, Along).GetSafeNormal();
+			if (i <= TopRings ? N.Z < 0.0f : FVector3f::DotProduct(N, FVector3f(P.X, P.Y, 0.0f)) < 0.0f)
+			{
+				N = -N;
+			}
+			if (i == 0)
+			{
+				N = FVector3f(0, 0, 1);
+			}
+			const FVertexID V = Description.CreateVertex();
+			Positions[V] = P;
+			const FVertexInstanceID I = Description.CreateVertexInstance(V);
+			Normals[I] = N;
+			Tangents[I] = Across.GetSafeNormal();
+			Signs[I] = 1.0f;
+			Colors[I] = Rings[i].C[s];
+			UVs.Set(I, 0, FVector2f(static_cast<float>(s) / Segments, static_cast<float>(i) / Rings.Num()));
+			Row.Add(I);
+		}
+	}
+	// Wind each triangle so its front face agrees with the surface normal (in Unreal's convention the
+	// front face is the one for which the cross product of the edges points away from the normal).
+	auto Triangle = [&](FVertexInstanceID A, FVertexInstanceID B, FVertexInstanceID C)
+	{
+		const FVector3f PA = Positions[Description.GetVertexInstanceVertex(A)];
+		const FVector3f PB = Positions[Description.GetVertexInstanceVertex(B)];
+		const FVector3f PC = Positions[Description.GetVertexInstanceVertex(C)];
+		const FVector3f N = Normals[A] + Normals[B] + Normals[C];
+		if (FVector3f::DotProduct(FVector3f::CrossProduct(PB - PA, PC - PA), N) > 0.0f)
+		{
+			Swap(B, C);
+		}
+		Description.CreateTriangle(Group, TArray<FVertexInstanceID>{ A, B, C });
+	};
+	for (int32 i = 0; i + 1 < Rings.Num(); ++i)
+	{
+		for (int32 s = 0; s < Segments; ++s)
+		{
+			Triangle(Ids[i][s], Ids[i + 1][s], Ids[i][s + 1]);
+			Triangle(Ids[i][s + 1], Ids[i + 1][s], Ids[i + 1][s + 1]);
+		}
+	}
+
+	// Hanging lobes of soil and rock beneath the bowl, of varied length, each tapering to a drip.
+	FTubeBuilder B{ Description, Group, Positions, Normals, Tangents, Signs, Colors, UVs };
+	const int32 NumLobes = 7 + Variant * 2;
+	for (int32 k = 0; k < NumLobes; ++k)
+	{
+		auto H = [&](uint32 Seed) { return WorldGen::HashFloat(Variant, k, 1200 + Seed); };
+		const float A = H(0) * 2.0f * PI;
+		const float Dist = (k == 0 ? 0.0f : FMath::Sqrt(H(1)) * 0.62f);
+		const float BaseR = FMath::Lerp(14.0f, 32.0f, H(2)) * (1.0f - Dist * 0.6f);
+		const float Length = FMath::Lerp(45.0f, 150.0f, H(3)) * (1.0f - Dist * 0.5f);
+		const FVector3f Start(FMath::Cos(A) * Dist * 100.0f, FMath::Sin(A) * Dist * 100.0f, -Depth * FMath::Pow(1.0f - Dist, 0.8f) * 0.6f);
+		const FVector3f Drift(H(4) * 16.0f - 8.0f, H(5) * 16.0f - 8.0f, 0.0f);
+		TArray<FVector3f> Points;
+		TArray<float> Radii;
+		for (int32 j = 0; j <= 8; ++j)
+		{
+			const float T = j / 8.0f;
+			Points.Add(Start + Drift * T * T + FVector3f(FMath::PerlinNoise1D(T * 3.0f + k) * 5.0f, FMath::PerlinNoise1D(T * 3.0f - k) * 5.0f, -Length * T));
+			Radii.Add(FMath::Max(BaseR * FMath::Pow(1.0f - T, 1.3f) * (1.0f + 0.2f * FMath::PerlinNoise1D(T * 6.0f + k)), 0.5f));
+		}
+		B.Color = FVector4f(1.0f, H(6) < 0.4f ? 0.8f : 0.15f, 0.6f, 1.0f);
+		B.Tube(Points, Radii, 10);
+	}
+
+	UStaticMesh* Mesh = NewObject<UStaticMesh>(this, *FString::Printf(TEXT("SM_Island%d"), Variant));
+	Mesh->GetStaticMaterials().Add(FStaticMaterial(PartMaterials[Island0 + Variant], TEXT("Island"), TEXT("Island")));
+	UStaticMesh::FBuildMeshDescriptionsParams Params;
+	Params.bFastBuild = true;
+	Params.bBuildSimpleCollision = false;
+	Mesh->BuildFromMeshDescriptions({ &Description }, Params);
+	return Mesh;
 }
 
 UStaticMesh* ATerrainStreamer::CreateTreeMesh(ETreeVariant Variant, FTreeTemplate& Out)
@@ -475,7 +655,7 @@ void ATerrainStreamer::Tick(float DeltaTime)
 		{
 			for (int32 Part = 0; Part < Tree0; ++Part)
 			{
-				if (Part != Bush && Pair.Value.Parts[Part])
+				if (Part != Bush && Part != IslandBush && Pair.Value.Parts[Part])
 				{
 					Pair.Value.Parts[Part]->SetCollisionEnabled(bWant ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
 				}
@@ -562,17 +742,17 @@ UStaticMesh* ATerrainStreamer::CreateGrassClumpMesh()
 	const FPolygonGroupID Group = Description.CreatePolygonGroup();
 	Attributes.GetPolygonGroupMaterialSlotNames()[Group] = TEXT("Grass");
 
-	constexpr int32 Blades = 14;
+	constexpr int32 Blades = 22;
 	constexpr int32 Segments = 3;
 	for (int32 Blade = 0; Blade < Blades; ++Blade)
 	{
 		auto Rand = [Blade](uint32 Seed) { return WorldGen::HashFloat(Blade, 7, 500 + Seed); };
 		const float Angle = Rand(0) * 2.0f * PI;
-		const float Spread = Rand(1) * 14.0f;
+		const float Spread = Rand(1) * 22.0f;
 		const FVector3f Base(FMath::Cos(Rand(2) * 2.0f * PI) * Spread, FMath::Sin(Rand(2) * 2.0f * PI) * Spread, 0.0f);
 		const FVector3f Facing(FMath::Cos(Angle), FMath::Sin(Angle), 0.0f);
 		const FVector3f Side(-Facing.Y, Facing.X, 0.0f);
-		const float Height = FMath::Lerp(32.0f, 68.0f, Rand(3));
+		const float Height = FMath::Lerp(40.0f, 95.0f, Rand(3));
 		const float HalfWidth = FMath::Lerp(0.6f, 1.1f, Rand(4));
 		const float Lean = FMath::Lerp(6.0f, 22.0f, Rand(5));
 		const FVector3f Normal = (Facing * 0.6f + FVector3f(0, 0, 0.8f)).GetSafeNormal();
@@ -689,6 +869,8 @@ void ATerrainStreamer::BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstan
 		}
 	}
 	auto At = [&](int32 X, int32 Y) -> const FWorldSample& { return Samples[Y * (Cells + 1) + X]; };
+	TArray<WorldGen::FPath> Paths;
+	WorldGen::PathsNear(Origin, Origin + FVector2D(GrassTileSize), 500.0, Paths);
 
 	TArray<FTransform> Transforms;
 	TArray<float> Data;
@@ -717,6 +899,11 @@ void ATerrainStreamer::BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstan
 				? BL.Height + FX * (BR.Height - BL.Height) + FY * (TL.Height - BL.Height)
 				: TR.Height + (1.0f - FX) * (TL.Height - TR.Height) + (1.0f - FY) * (BR.Height - TR.Height);
 			if (Height < 40.0f)
+			{
+				continue;
+			}
+			float PathWidth;
+			if (Paths.Num() > 0 && WorldGen::DistanceToPath(Paths, P, PathWidth) < PathWidth * 0.5f + 40.0f)
 			{
 				continue;
 			}
@@ -768,8 +955,102 @@ void ATerrainStreamer::BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32
 		Chunk.Mesh = AcquireMesh();
 	}
 	BuildSurface(Chunk.Mesh, FVector(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize(), 0.0), ChunkResolution / Step, GridSpacing * Step, bWithCollision);
+	// Paths sit exactly on full-detail terrain, so they exist only there.
+	if (Step == 1 && Chunk.Step != 1)
+	{
+		BuildPaths(Coord, Chunk);
+	}
+	else if (Step != 1 && Chunk.PathMesh)
+	{
+		Chunk.PathMesh->ClearAllMeshSections();
+		Chunk.PathMesh->SetVisibility(false);
+		MeshPool.Add(Chunk.PathMesh);
+		Chunk.PathMesh = nullptr;
+	}
 	Chunk.Step = Step;
 	Chunk.bHasCollision = bWithCollision;
+}
+
+float ATerrainStreamer::SurfaceHeight(double X, double Y) const
+{
+	const double GX = X / GridSpacing;
+	const double GY = Y / GridSpacing;
+	const double IX = FMath::FloorToDouble(GX);
+	const double IY = FMath::FloorToDouble(GY);
+	const float FX = GX - IX;
+	const float FY = GY - IY;
+	const float BL = WorldGen::Height(IX * GridSpacing, IY * GridSpacing);
+	const float BR = WorldGen::Height((IX + 1) * GridSpacing, IY * GridSpacing);
+	const float TL = WorldGen::Height(IX * GridSpacing, (IY + 1) * GridSpacing);
+	const float TR = WorldGen::Height((IX + 1) * GridSpacing, (IY + 1) * GridSpacing);
+	// Same triangle split as the terrain mesh (diagonal from bottom-right to top-left).
+	return FX + FY <= 1.0f
+		? BL + FX * (BR - BL) + FY * (TL - BL)
+		: TR + (1.0f - FX) * (TL - TR) + (1.0f - FY) * (BR - TR);
+}
+
+void ATerrainStreamer::BuildPaths(const FIntPoint& Coord, FChunk& Chunk)
+{
+	const FVector2D Min(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize());
+	const FVector2D Max = Min + FVector2D(ChunkWorldSize());
+	TArray<WorldGen::FPath> Paths;
+	WorldGen::PathsNear(Min, Max, 1000.0, Paths);
+
+	TArray<FVector> Vertices;
+	TArray<int32> Triangles;
+	TArray<FVector> Normals;
+	TArray<FVector2D> UVs;
+	TArray<FColor> Colors;
+	constexpr float Step = 250.0f;
+	for (const WorldGen::FPath& Path : Paths)
+	{
+		const float Length = FVector2D::Distance(Path.A, Path.B);
+		const int32 Count = FMath::CeilToInt(Length / Step);
+		int32 Prev = INDEX_NONE;
+		for (int32 i = 0; i <= Count; ++i)
+		{
+			const float T = static_cast<float>(i) / Count;
+			const FVector2D P = WorldGen::PathPoint(Path, T);
+			// Only the stretch over this chunk (with a little overlap so neighbours join seamlessly).
+			const bool bInside = P.X >= Min.X - Step && P.X <= Max.X + Step && P.Y >= Min.Y - Step && P.Y <= Max.Y + Step;
+			const float Ground = WorldGen::Height(P.X, P.Y);
+			if (!bInside || Ground < 40.0f)
+			{
+				Prev = INDEX_NONE;
+				continue;
+			}
+			const FVector2D Dir = (WorldGen::PathPoint(Path, FMath::Min(T + 0.5f / Count, 1.0f)) - WorldGen::PathPoint(Path, FMath::Max(T - 0.5f / Count, 0.0f))).GetSafeNormal();
+			const FVector2D Side(-Dir.Y, Dir.X);
+			const int32 Base = Vertices.Num();
+			for (const float Edge : { -0.5f, 0.5f })
+			{
+				const FVector2D Q = P + Side * Path.Width * Edge;
+				Vertices.Add(FVector(Q.X - Min.X, Q.Y - Min.Y, SurfaceHeight(Q.X, Q.Y) + 8.0f));
+				Normals.Add(FVector::UpVector);
+				UVs.Add(FVector2D(Edge + 0.5f, T * Length / 400.0f));
+				Colors.Add(Path.bRoad ? FColor(255, 0, 0, 255) : FColor(0, 0, 0, 255));
+			}
+			if (Prev != INDEX_NONE)
+			{
+				Triangles.Append({ Prev, Base, Prev + 1, Prev + 1, Base, Base + 1 });
+				Triangles.Append({ Prev, Prev + 1, Base, Prev + 1, Base + 1, Base }); // both faces, winding-proof
+			}
+			Prev = Base;
+		}
+	}
+
+	if (Vertices.Num() == 0)
+	{
+		return;
+	}
+	if (!Chunk.PathMesh)
+	{
+		Chunk.PathMesh = AcquireMesh();
+	}
+	Chunk.PathMesh->SetWorldLocation(FVector(Min.X, Min.Y, 0.0));
+	Chunk.PathMesh->CreateMeshSection(0, Vertices, Triangles, Normals, UVs, Colors, TArray<FProcMeshTangent>(), false);
+	Chunk.PathMesh->SetMaterial(0, PathMaterial);
+	Chunk.PathMesh->SetCastShadow(false);
 }
 
 void ATerrainStreamer::BuildSurface(UProceduralMeshComponent* Mesh, const FVector& Origin, int32 N, float Spacing, bool bWithCollision) const
@@ -978,6 +1259,8 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) 
 	GatherClearings(CityCell, CityRadius + 3000.0, [](int32 X, int32 Y, FVector& P) { return FindCity(X, Y, P); });
 	GatherClearings(StoneCircleCell, StoneCircleRadius + 1500.0, [](int32 X, int32 Y, FVector& P) { return FindStoneCircle(X, Y, P); });
 	GatherClearings(LighthouseCell, 3000.0, [](int32 X, int32 Y, FVector& P) { return FindLighthouse(X, Y, P); });
+	TArray<WorldGen::FPath> Paths;
+	WorldGen::PathsNear(FVector2D(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize()), FVector2D((Coord.X + 1) * ChunkWorldSize(), (Coord.Y + 1) * ChunkWorldSize()), 1000.0, Paths);
 
 	for (int32 CY = FirstY; CY < FirstY + CellsPerChunk; ++CY)
 	{
@@ -991,7 +1274,8 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) 
 			{
 				bCleared |= FVector2D::DistSquared(Clearing.Key, FVector2D(PX, PY)) < FMath::Square(Clearing.Value);
 			}
-			if (bCleared)
+			float PathWidth;
+			if (bCleared || (Paths.Num() > 0 && WorldGen::DistanceToPath(Paths, FVector2D(PX, PY), PathWidth) < PathWidth * 0.5f + 300.0f))
 			{
 				continue;
 			}
@@ -1103,7 +1387,9 @@ bool ATerrainStreamer::FindVillage(int32 CX, int32 CY, FVector& OutCenter)
 	{
 		return false;
 	}
-	OutCenter = FVector((CX + Rand.Range(0.2f, 0.8f)) * VillageCell, (CY + Rand.Range(0.2f, 0.8f)) * VillageCell, 0.0);
+	// Villages grow at road junctions (the village grid is the road grid).
+	static_assert(VillageCell == 250000.0, "villages sit on WorldGen road nodes");
+	OutCenter = FVector(WorldGen::RoadNode(CX, CY), 0.0);
 	const FWorldSample S = WorldGen::Sample(OutCenter.X, OutCenter.Y);
 	OutCenter.Z = S.Height;
 	return S.Height >= 300.0f && S.Height <= 30000.0f && S.Mountains <= 0.3f && S.Volcano <= 0.0f && S.Biome != EBiome::Beach && S.Biome != EBiome::Snow;
@@ -1394,7 +1680,7 @@ void ATerrainStreamer::AddCities(const FIntPoint& Coord, FPropBatch& Batch) cons
 				continue;
 			}
 
-			constexpr int32 Blocks = 7;
+			constexpr int32 Blocks = 11;
 			constexpr float Spacing = 6000.0f;
 			for (int32 GY = -Blocks; GY <= Blocks; ++GY)
 			{
@@ -1416,7 +1702,7 @@ void ATerrainStreamer::AddCities(const FIntPoint& Coord, FPropBatch& Batch) cons
 					{
 						continue;
 					}
-					const float H = FMath::Lerp(2500.0f, 20000.0f, Falloff * Falloff * Tower.Next());
+					const float H = FMath::Lerp(2500.0f, 38000.0f, Falloff * Falloff * FMath::Pow(Tower.Next(), 0.7f));
 					const float W = Tower.Range(1800.0f, 3400.0f);
 					const float Dp = W * Tower.Range(0.7f, 1.0f);
 					const int32 Style = FMath::FloorToInt(Tower.Next() * 3.0f); // 0 curtain glass, 1 ribbon windows, 2 masonry grid
@@ -1538,20 +1824,29 @@ void ATerrainStreamer::AddFloatingIslands(const FIntPoint& Coord, FPropBatch& Ba
 			}
 			FRandom Rand{ CX, CY, SeedIsland + 1 };
 
-			// Rocky underside tapering to a point, a grassy cap, and a small wood on top.
-			const float Depth = R * Rand.Range(1.2f, 2.0f);
-			Batch.Add(Cone, Top - FVector(0, 0, Depth * 0.5f), FRotator(180, Rand.Range(0.0f, 360.0f), 0), FVector(R * 2.0f, R * 2.0f, Depth), White, 0.0f, SurfRock);
-			Batch.Add(Sphere, Top, FRotator::ZeroRotator, FVector(R * 2.1f, R * 2.1f, R * 0.35f), White, 0.0f, SurfGrass);
+			// The island itself: a generated mesh (radius 100 units) scaled to size, with a small wood on top.
+			const int32 Variant = FMath::FloorToInt(Rand.Next() * NumIslandVariants) % NumIslandVariants;
+			const float Scale = R / 100.0f;
+			const FRotator Spin(0.0f, Rand.Range(0.0f, 360.0f), 0.0f);
+			Batch.Add(static_cast<EPropPart>(Island0 + Variant), Top, Spin, FVector(Scale), White);
 
-			const int32 Trees = 8 + FMath::FloorToInt(Rand.Next() * 16);
+			const FTreeTemplate& T = TreeTemplates[TreeBroadleafA];
+			const int32 Trees = 10 + FMath::FloorToInt(Rand.Next() * 20);
 			for (int32 i = 0; i < Trees; ++i)
 			{
 				const float A = Rand.Range(0.0f, 2.0f * PI);
-				const float D = R * 0.7f * FMath::Sqrt(Rand.Next());
-				const FVector Base = Top + FVector(FMath::Cos(A) * D, FMath::Sin(A) * D, R * 0.15f * (1.0f - D / R));
-				const float Size = Rand.Range(0.8f, 1.5f);
-				Batch.Add(Trunk, Base + FVector(0, 0, 250.0f * Size), FRotator::ZeroRotator, FVector(60, 60, 500) * Size, Bark, 0.0f, SurfConcrete);
-				Batch.Add(Bush, Base + FVector(0, 0, 750.0f * Size), FRotator(0, A * 57.0f, 0), FVector(750, 750, 650) * Size, Jitter(LeafTemperate, Rand.Next()));
+				const float D = 70.0f * FMath::Sqrt(Rand.Next());
+				const float LX = FMath::Cos(A) * D, LY = FMath::Sin(A) * D;
+				const FVector Base = Top + Spin.RotateVector(FVector(LX, LY, IslandTopHeight(Variant, LX, LY)) * Scale) - FVector(0, 0, 30.0f);
+				const float Size = Rand.Range(0.8f, 1.4f);
+				const FRotator TreeSpin(0.0f, Rand.Range(0.0f, 360.0f), 0.0f);
+				Batch.Add(IslandTree, Base, TreeSpin, FVector(Size), BarkWarm);
+				const FLinearColor Leaves = Jitter(LeafTemperate, Rand.Next());
+				for (const FTreeTemplate::FTip& Tip : T.Tips)
+				{
+					const float W = Tip.Size * Size;
+					Batch.Add(IslandBush, Base + TreeSpin.RotateVector(Tip.Position * Size), FRotator(0.0f, Rand.Range(0.0f, 360.0f), 0.0f), FVector(W, W, W * 0.85f), Leaves);
+				}
 			}
 		}
 	}
@@ -1585,7 +1880,7 @@ UHierarchicalInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPa
 		// Trunk colliders, rocks and buildings are solid so you can weave between trees; foliage and the
 		// tree wood meshes themselves are not (the colliders stand in for trunks). Vegetation dissolves
 		// in and out smoothly by distance in its materials, so there's no hard cull distance here.
-		if (Part == Bush || Part >= Tree0)
+		if (Part == Bush || Part == IslandBush || Part >= Tree0)
 		{
 			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		}
@@ -1610,12 +1905,15 @@ UHierarchicalInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPa
 
 void ATerrainStreamer::ReleaseChunk(FChunk& Chunk)
 {
-	if (Chunk.Mesh)
+	for (UProceduralMeshComponent** Mesh : { &Chunk.Mesh, &Chunk.PathMesh })
 	{
-		Chunk.Mesh->ClearAllMeshSections();
-		Chunk.Mesh->SetVisibility(false);
-		MeshPool.Add(Chunk.Mesh);
-		Chunk.Mesh = nullptr;
+		if (*Mesh)
+		{
+			(*Mesh)->ClearAllMeshSections();
+			(*Mesh)->SetVisibility(false);
+			MeshPool.Add(*Mesh);
+			*Mesh = nullptr;
+		}
 	}
 	for (int32 Part = 0; Part < NumParts; ++Part)
 	{

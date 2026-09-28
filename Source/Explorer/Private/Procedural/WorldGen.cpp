@@ -67,6 +67,104 @@ namespace WorldGen
 		return FLinearColor(FColor((Hex >> 16) & 0xFF, (Hex >> 8) & 0xFF, Hex & 0xFF));
 	}
 
+	double RoadCellSize() { return 250000.0; }
+	static constexpr double TrailCellSize = 70000.0;
+
+	FVector2D RoadNode(int32 CX, int32 CY)
+	{
+		return FVector2D((CX + FMath::Lerp(0.2f, 0.8f, HashFloat(CX, CY, 21))) * RoadCellSize(), (CY + FMath::Lerp(0.2f, 0.8f, HashFloat(CX, CY, 22))) * RoadCellSize());
+	}
+
+	static FVector2D TrailNode(int32 CX, int32 CY)
+	{
+		return FVector2D((CX + FMath::Lerp(0.15f, 0.85f, HashFloat(CX, CY, 931))) * TrailCellSize, (CY + FMath::Lerp(0.15f, 0.85f, HashFloat(CX, CY, 932))) * TrailCellSize);
+	}
+
+	void PathsNear(const FVector2D& Min, const FVector2D& Max, double Margin, TArray<FPath>& Out)
+	{
+		auto Gather = [&](double Cell, bool bRoad, float Chance, float Width, uint32 Seed, FVector2D (*Node)(int32, int32))
+		{
+			const int32 X0 = FMath::FloorToInt((Min.X - Margin) / Cell) - 1;
+			const int32 X1 = FMath::FloorToInt((Max.X + Margin) / Cell) + 1;
+			const int32 Y0 = FMath::FloorToInt((Min.Y - Margin) / Cell) - 1;
+			const int32 Y1 = FMath::FloorToInt((Max.Y + Margin) / Cell) + 1;
+			for (int32 CY = Y0; CY <= Y1; ++CY)
+			{
+				for (int32 CX = X0; CX <= X1; ++CX)
+				{
+					const FVector2D A = Node(CX, CY);
+					const FIntPoint Next[] = { FIntPoint(CX + 1, CY), FIntPoint(CX, CY + 1) };
+					for (int32 k = 0; k < 2; ++k)
+					{
+						if (HashFloat(CX, CY, Seed + k) > Chance)
+						{
+							continue;
+						}
+						const FVector2D B = Node(Next[k].X, Next[k].Y);
+						const double Reach = Margin + FVector2D::Distance(A, B) * 0.2;
+						const FVector2D Lo(FMath::Min(A.X, B.X) - Reach, FMath::Min(A.Y, B.Y) - Reach);
+						const FVector2D Hi(FMath::Max(A.X, B.X) + Reach, FMath::Max(A.Y, B.Y) + Reach);
+						if (Hi.X >= Min.X && Lo.X <= Max.X && Hi.Y >= Min.Y && Lo.Y <= Max.Y)
+						{
+							Out.Add({ A, B, Width, bRoad, Hash(CX, CY, Seed + 7 + k) });
+						}
+					}
+				}
+			}
+		};
+		Gather(RoadCellSize(), true, 0.75f, 420.0f, 940, &RoadNode);
+		Gather(TrailCellSize, false, 0.45f, 150.0f, 950, &TrailNode);
+	}
+
+	FVector2D PathPoint(const FPath& Path, float T)
+	{
+		const FVector2D Along = Path.B - Path.A;
+		const float Length = Along.Size();
+		const FVector2D Side(-Along.Y / Length, Along.X / Length);
+		// Two scales of wander, pinned to zero at both ends so paths meet their nodes.
+		const float Phase = (Path.Seed & 1023) * 0.37f;
+		const float Wander = FMath::PerlinNoise1D(T * Length / 60000.0f + Phase) * 0.12f + FMath::PerlinNoise1D(T * Length / 9000.0f + Phase * 2.0f) * 0.015f;
+		return Path.A + Along * T + Side * Wander * Length * FMath::Sin(T * PI);
+	}
+
+	float DistanceToPath(const TArray<FPath>& Paths, const FVector2D& P, float& OutWidth)
+	{
+		float Best = TNumericLimits<float>::Max();
+		OutWidth = 0.0f;
+		for (const FPath& Path : Paths)
+		{
+			const FVector2D Along = Path.B - Path.A;
+			const float Length = Along.Size();
+			// Quick reject against the straight line plus the widest wander.
+			const float T = FMath::Clamp(FVector2D::DotProduct(P - Path.A, Along) / (Length * Length), 0.0f, 1.0f);
+			if (FVector2D::Distance(P, Path.A + Along * T) > Length * 0.15f + Best)
+			{
+				continue;
+			}
+			// Refine around the nearest parameter on the meandering curve.
+			float Lo = FMath::Max(0.0f, T - 0.2f), Hi = FMath::Min(1.0f, T + 0.2f);
+			for (int32 Pass = 0; Pass < 3; ++Pass)
+			{
+				float BestT = Lo, BestD = TNumericLimits<float>::Max();
+				for (int32 i = 0; i <= 8; ++i)
+				{
+					const float S = FMath::Lerp(Lo, Hi, i / 8.0f);
+					const float D = FVector2D::DistSquared(P, PathPoint(Path, S));
+					if (D < BestD) { BestD = D; BestT = S; }
+				}
+				const float Span = (Hi - Lo) / 8.0f;
+				Lo = FMath::Max(0.0f, BestT - Span);
+				Hi = FMath::Min(1.0f, BestT + Span);
+				if (Pass == 2 && FMath::Sqrt(BestD) < Best)
+				{
+					Best = FMath::Sqrt(BestD);
+					OutWidth = Path.Width;
+				}
+			}
+		}
+		return Best;
+	}
+
 	double VolcanoCellSize() { return 4000000.0; }
 
 	bool FindVolcano(int32 CX, int32 CY, FVector2D& OutCenter, float& OutRadius, float& OutHeight)

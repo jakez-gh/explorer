@@ -90,7 +90,10 @@ private:
 		Rock,
 		Bush,
 		Trunk, // invisible collider around tree trunks
+		IslandBush, // foliage on floating islands, which never fades with distance
 		Tree0, Tree1, Tree2, Tree3, Tree4, Tree5, Tree6, Tree7, // runtime-built tree wood meshes
+		IslandTree, // broadleaf wood that never fades, for floating islands
+		Island0, Island1, Island2, Island3, // runtime-built floating island meshes
 		NumParts
 	};
 
@@ -133,6 +136,12 @@ private:
 
 	UStaticMesh* CreateTreeMesh(ETreeVariant Variant, FTreeTemplate& OutTemplate);
 
+	// Floating islands are unit meshes (radius 100) scaled per instance. Top surface height at a
+	// local position (radius-100 units), for planting trees on it.
+	static constexpr int32 NumIslandVariants = 4;
+	static float IslandTopHeight(int32 Variant, float LocalX, float LocalY);
+	UStaticMesh* CreateIslandMesh(int32 Variant);
+
 	enum class EProps : uint8
 	{
 		None,
@@ -143,6 +152,8 @@ private:
 	struct FChunk
 	{
 		UProceduralMeshComponent* Mesh = nullptr;
+		// Roads and trails laid on the terrain (full-detail chunks only).
+		UProceduralMeshComponent* PathMesh = nullptr;
 		UHierarchicalInstancedStaticMeshComponent* Parts[NumParts] = {};
 		int32 Step = 0;
 		bool bHasCollision = false;
@@ -175,6 +186,9 @@ private:
 	// Builds an N x N quad terrain patch with skirts at Origin (its Z offsets the whole patch).
 	void BuildSurface(UProceduralMeshComponent* Mesh, const FVector& Origin, int32 N, float Spacing, bool bWithCollision) const;
 	void UpdateFarTerrain(const FIntPoint& Center, double Deadline);
+	void BuildPaths(const FIntPoint& Coord, FChunk& Chunk);
+	// Height of the rendered full-detail terrain surface (matches its triangles exactly).
+	float SurfaceHeight(double X, double Y) const;
 	void UpdateGrass(const FVector& ViewLocation, double Deadline);
 	void BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstancedStaticMeshComponent* Component) const;
 	UStaticMesh* CreateGrassClumpMesh();
@@ -197,6 +211,9 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInterface> BarkMaterial;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> PathMaterial;
 
 	TMap<FIntPoint, FChunk> Chunks;
 	TMap<FIntPoint, UProceduralMeshComponent*> FarTiles;

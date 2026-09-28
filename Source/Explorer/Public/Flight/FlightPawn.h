@@ -59,7 +59,7 @@ protected:
 
 	// How quickly the nose drifts back to level when not pitching (per second).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
-	float AutoLevelRate = 0.4f;
+	float AutoLevelRate = 1.2f;
 
 	// Flight-stick convention: push forward to dip the nose, pull back to climb.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
@@ -99,10 +99,22 @@ protected:
 
 	// How firmly the held height is tracked (1/s), and the vertical acceleration available (cm/s^2).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
-	float AltitudeStiffness = 3.0f;
+	float AltitudeStiffness = 0.5f;
+
+	// How much of the ground's rise and fall is followed when flying level (0 = none, 1 = all).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
+	float TerrainFollow = 0.5f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
-	float AltitudeAccel = 5000.0f;
+	float AltitudeAccel = 1500.0f;
+
+	// Caps on how hard level flight is drawn up or down (cm/s): towards the cruising height, and along
+	// the ground's slope.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
+	float MaxCorrectionSpeed = 600.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
+	float MaxFollowSpeed = 1200.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Feel")
 	float FieldOfView = 90.0f;

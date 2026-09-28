@@ -69,6 +69,24 @@ namespace WorldGen
 	bool FindVolcano(int32 CellX, int32 CellY, FVector2D& OutCenter, float& OutRadius, float& OutHeight);
 	double VolcanoCellSize();
 
+	// Roads join junctions on a ~2.5 km grid (villages sit on them); trails join points on a finer grid.
+	// Each path is a gently meandering curve between two nodes.
+	struct FPath
+	{
+		FVector2D A;
+		FVector2D B;
+		float Width = 400.0f;
+		bool bRoad = true;
+		uint32 Seed = 0;
+	};
+	double RoadCellSize();
+	FVector2D RoadNode(int32 CellX, int32 CellY);
+	// All paths that could come within Margin of the box.
+	void PathsNear(const FVector2D& Min, const FVector2D& Max, double Margin, TArray<FPath>& Out);
+	FVector2D PathPoint(const FPath& Path, float T);
+	// Distance from a point to the nearest path's centreline (in world units), and that path's width.
+	float DistanceToPath(const TArray<FPath>& Paths, const FVector2D& P, float& OutWidth);
+
 	uint32 Hash(int32 X, int32 Y, uint32 Seed);
 	// Uniform in [0, 1).
 	float HashFloat(int32 X, int32 Y, uint32 Seed);
