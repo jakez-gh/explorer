@@ -83,6 +83,74 @@ namespace
 	const FLinearColor LeafGold(1.7f, 1.25f, 0.35f);
 	const FLinearColor LeafRust(1.8f, 0.75f, 0.3f);
 	const FLinearColor LeafFrost(1.5f, 1.6f, 1.6f);
+
+	// Bark tints (multiply M_Bark's brown).
+	const FLinearColor BarkWarm(1.0f, 0.95f, 0.85f);
+	const FLinearColor BarkDark(0.8f, 0.72f, 0.65f);
+	const FLinearColor BarkPale(1.5f, 1.45f, 1.3f);
+	const FLinearColor BarkBirch(4.2f, 4.2f, 4.0f);
+
+	/** Builds tapered tubes (trunk and branches) into a mesh description. */
+	struct FTubeBuilder
+	{
+		FMeshDescription& Desc;
+		FPolygonGroupID Group;
+		TVertexAttributesRef<FVector3f> Positions;
+		TVertexInstanceAttributesRef<FVector3f> Normals;
+		TVertexInstanceAttributesRef<FVector3f> Tangents;
+		TVertexInstanceAttributesRef<float> Signs;
+		TVertexInstanceAttributesRef<FVector4f> Colors;
+		TVertexInstanceAttributesRef<FVector2f> UVs;
+
+		void Tube(const TArray<FVector3f>& Points, const TArray<float>& Radii, int32 Sides)
+		{
+			const int32 N = Points.Num();
+			TArray<TArray<FVertexInstanceID>> Rings;
+			FVector3f PrevSide = FVector3f::ZeroVector;
+			float V = 0.0f;
+			for (int32 i = 0; i < N; ++i)
+			{
+				const FVector3f Along = (Points[FMath::Min(i + 1, N - 1)] - Points[FMath::Max(i - 1, 0)]).GetSafeNormal();
+				FVector3f Side;
+				if (i == 0)
+				{
+					const FVector3f Up = FMath::Abs(Along.Z) < 0.95f ? FVector3f(0, 0, 1) : FVector3f(1, 0, 0);
+					Side = FVector3f::CrossProduct(Along, Up).GetSafeNormal();
+				}
+				else
+				{
+					// Parallel transport keeps the rings from twisting.
+					Side = (PrevSide - Along * FVector3f::DotProduct(PrevSide, Along)).GetSafeNormal();
+					V += FVector3f::Distance(Points[i], Points[i - 1]) / 150.0f;
+				}
+				PrevSide = Side;
+				const FVector3f Binormal = FVector3f::CrossProduct(Along, Side);
+				TArray<FVertexInstanceID>& Ring = Rings.AddDefaulted_GetRef();
+				for (int32 K = 0; K <= Sides; ++K)
+				{
+					const float A = 2.0f * PI * K / Sides;
+					const FVector3f Dir = Side * FMath::Cos(A) + Binormal * FMath::Sin(A);
+					const FVertexID Vertex = Desc.CreateVertex();
+					Positions[Vertex] = Points[i] + Dir * Radii[i];
+					const FVertexInstanceID Instance = Desc.CreateVertexInstance(Vertex);
+					Normals[Instance] = Dir;
+					Tangents[Instance] = Along;
+					Signs[Instance] = 1.0f;
+					Colors[Instance] = FVector4f(0, 0, 0, 1);
+					UVs.Set(Instance, 0, FVector2f(2.0f * K / Sides, V));
+					Ring.Add(Instance);
+				}
+			}
+			for (int32 i = 0; i + 1 < N; ++i)
+			{
+				for (int32 K = 0; K < Sides; ++K)
+				{
+					Desc.CreateTriangle(Group, TArray<FVertexInstanceID>{ Rings[i][K], Rings[i + 1][K], Rings[i][K + 1] });
+					Desc.CreateTriangle(Group, TArray<FVertexInstanceID>{ Rings[i][K + 1], Rings[i + 1][K], Rings[i + 1][K + 1] });
+				}
+			}
+		}
+	};
 }
 
 ATerrainStreamer::ATerrainStreamer()
@@ -106,8 +174,17 @@ ATerrainStreamer::ATerrainStreamer()
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
 
 	TerrainMaterial = TerrainMat.Object;
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> BarkMat(TEXT("/Game/Explorer/Materials/M_Bark.M_Bark"));
+	BarkMaterial = BarkMat.Object;
 	PartMeshes = { CylinderMesh.Object, ConeMesh.Object, SphereMesh.Object, CubeMesh.Object, RockMesh.Object, BushMesh.Object, CylinderMesh.Object };
 	PartMaterials = { PropMat.Object, PropMat.Object, PropMat.Object, PropMat.Object, RockMat.Object, FoliageMat.Object, PropMat.Object };
+	// Tree meshes are generated in BeginPlay.
+	PartMeshes.SetNum(NumParts);
+	PartMaterials.SetNum(NumParts);
+	for (int32 Part = Tree0; Part < NumParts; ++Part)
+	{
+		PartMaterials[Part] = BarkMaterial;
+	}
 
 	Ocean = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Ocean"));
 	Ocean->SetupAttachment(RootComponent);
@@ -145,6 +222,167 @@ void ATerrainStreamer::BeginPlay()
 {
 	Super::BeginPlay();
 	GrassMesh = CreateGrassClumpMesh();
+	for (int32 Variant = 0; Variant < NumTreeVariants; ++Variant)
+	{
+		PartMeshes[Tree0 + Variant] = CreateTreeMesh(static_cast<ETreeVariant>(Variant), TreeTemplates[Variant]);
+	}
+}
+
+UStaticMesh* ATerrainStreamer::CreateTreeMesh(ETreeVariant Variant, FTreeTemplate& Out)
+{
+	FMeshDescription Description;
+	FStaticMeshAttributes Attributes(Description);
+	Attributes.Register();
+	Attributes.GetVertexInstanceUVs().SetNumChannels(1);
+	FTubeBuilder B{ Description, Description.CreatePolygonGroup(), Attributes.GetVertexPositions(), Attributes.GetVertexInstanceNormals(),
+		Attributes.GetVertexInstanceTangents(), Attributes.GetVertexInstanceBinormalSigns(), Attributes.GetVertexInstanceColors(), Attributes.GetVertexInstanceUVs() };
+	Attributes.GetPolygonGroupMaterialSlotNames()[B.Group] = TEXT("Bark");
+
+	int32 Counter = 0;
+	auto Rand = [&]() { return WorldGen::HashFloat(Variant, Counter++, 800); };
+	auto Range = [&](float Min, float Max) { return FMath::Lerp(Min, Max, Rand()); };
+
+	// Shape parameters per kind.
+	float Height = 800.0f, Radius = 30.0f, Lean = 30.0f, Flare = 1.8f;
+	switch (Variant)
+	{
+	case TreeConiferA: case TreeConiferB: Height = Range(1300.0f, 1700.0f); Radius = 26.0f; Lean = 10.0f; Flare = 1.5f; break;
+	case TreeAcacia: Height = 560.0f; Radius = 24.0f; Lean = 60.0f; Flare = 1.4f; break;
+	case TreeJungle: Height = 2000.0f; Radius = 48.0f; Lean = 25.0f; Flare = 3.0f; break;
+	case TreeBirch: Height = 950.0f; Radius = 15.0f; Lean = 45.0f; Flare = 1.4f; break;
+	default: Height = Range(700.0f, 950.0f); Radius = Range(26.0f, 36.0f); Lean = Range(20.0f, 55.0f); Flare = 1.9f; break;
+	}
+	const float TrunkTop = Variant == TreeAcacia ? Height * 0.45f : Height;
+	const float LeanAngle = Range(0.0f, 2.0f * PI);
+	const FVector3f LeanDir(FMath::Cos(LeanAngle), FMath::Sin(LeanAngle), 0.0f);
+
+	// Trunk axis and radius at a height: a gentle curve, tapering, flaring into roots at the base.
+	auto Axis = [&](float Z) { const float T = Z / Height; return LeanDir * Lean * FMath::Sin(T * PI * 0.8f) + FVector3f(0, 0, Z); };
+	auto TrunkRadius = [&](float Z)
+	{
+		const float T = FMath::Clamp(Z / TrunkTop, 0.0f, 1.0f);
+		const float Taper = Radius * FMath::Lerp(1.0f, Variant == TreeAcacia ? 0.55f : 0.08f, FMath::Pow(T, 0.8f));
+		return Taper + Radius * (Flare - 1.0f) * FMath::Exp(-FMath::Max(Z, 0.0f) / 45.0f);
+	};
+
+	TArray<FVector3f> Points;
+	TArray<float> Radii;
+	for (int32 i = 0; i <= 12; ++i)
+	{
+		const float Z = -40.0f + (TrunkTop + 40.0f) * i / 12.0f;
+		Points.Add(Axis(Z));
+		Radii.Add(i == 12 ? 1.0f : TrunkRadius(Z));
+	}
+	B.Tube(Points, Radii, 10);
+
+	// Root buttresses spreading into the ground.
+	const int32 Roots = Variant == TreeJungle ? 6 : 4;
+	for (int32 r = 0; r < Roots; ++r)
+	{
+		const float A = (r + Range(-0.2f, 0.2f)) * 2.0f * PI / Roots;
+		const FVector3f Out(FMath::Cos(A), FMath::Sin(A), 0.0f);
+		const float Reach = Radius * Flare * Range(2.0f, 3.0f);
+		Points = { FVector3f(0, 0, Radius * 1.4f), Out * Reach * 0.35f + FVector3f(0, 0, Radius * 0.4f), Out * Reach + FVector3f(0, 0, -Radius * 0.4f) };
+		Radii = { Radius * 0.5f, Radius * 0.35f, 2.0f };
+		B.Tube(Points, Radii, 6);
+	}
+
+	// A branch from the trunk (starting inside it, so it's joined) curving out and up; its tip carries foliage.
+	auto Branch = [&](const FVector3f& Start, const FVector3f& Dir, float Length, float StartRadius, float Rise, float TipSize, bool bMidFoliage)
+	{
+		TArray<FVector3f> BP;
+		TArray<float> BR;
+		for (int32 i = 0; i <= 5; ++i)
+		{
+			const float T = i / 5.0f;
+			BP.Add(Start + Dir * Length * T + FVector3f(0, 0, Rise * Length * T * T));
+			BR.Add(FMath::Lerp(StartRadius, 1.5f, T));
+		}
+		B.Tube(BP, BR, 6);
+		Out.Tips.Add({ FVector(BP.Last()), TipSize });
+		if (bMidFoliage)
+		{
+			Out.Tips.Add({ FVector(BP[3]), TipSize * 0.75f });
+		}
+		return BP;
+	};
+
+	switch (Variant)
+	{
+	case TreeConiferA:
+	case TreeConiferB:
+	{
+		// Whorls of short, drooping branches, longest at the bottom.
+		const int32 Count = 11;
+		for (int32 i = 0; i < Count; ++i)
+		{
+			const float T = FMath::Lerp(0.2f, 0.9f, i / static_cast<float>(Count - 1));
+			const float Z = T * Height;
+			const float A = i * 2.4f + Range(-0.3f, 0.3f);
+			const FVector3f Dir = FVector3f(FMath::Cos(A), FMath::Sin(A), -0.2f).GetSafeNormal();
+			const float Length = (1.0f - T) * Height * 0.34f + 60.0f;
+			Branch(Axis(Z), Dir, Length, FMath::Max(TrunkRadius(Z) * 0.35f, 3.0f), -0.1f, Length * 1.8f + 60.0f, true);
+		}
+		Out.Tips.Add({ FVector(Axis(Height * 0.95f)), 170.0f });
+		break;
+	}
+	case TreeAcacia:
+	{
+		// The trunk forks into limbs that spread up and out to a flat top.
+		const int32 Limbs = 4;
+		for (int32 i = 0; i < Limbs; ++i)
+		{
+			const float A = (i + Range(-0.2f, 0.2f)) * 2.0f * PI / Limbs;
+			const FVector3f Dir = FVector3f(FMath::Cos(A), FMath::Sin(A), 1.0f).GetSafeNormal();
+			Branch(Axis(TrunkTop - 20.0f), Dir, Range(450.0f, 600.0f), Radius * 0.5f, 0.05f, 520.0f, true);
+		}
+		break;
+	}
+	case TreeJungle:
+	{
+		const int32 Limbs = 5;
+		for (int32 i = 0; i < Limbs; ++i)
+		{
+			const float Z = Height * Range(0.78f, 0.9f);
+			const float A = (i + Range(-0.2f, 0.2f)) * 2.0f * PI / Limbs;
+			const FVector3f Dir = FVector3f(FMath::Cos(A), FMath::Sin(A), 0.6f).GetSafeNormal();
+			Branch(Axis(Z), Dir, Range(500.0f, 700.0f), TrunkRadius(Z) * 0.5f, 0.15f, 750.0f, true);
+		}
+		Out.Tips.Add({ FVector(Axis(Height)), 800.0f });
+		break;
+	}
+	default:
+	{
+		// Broadleaf and birch: limbs spiralling up the trunk, each with a side branch.
+		const int32 Limbs = Variant == TreeBirch ? 5 : 6;
+		for (int32 i = 0; i < Limbs; ++i)
+		{
+			const float T = FMath::Lerp(0.38f, 0.78f, i / static_cast<float>(Limbs - 1)) + Range(-0.03f, 0.03f);
+			const float Z = T * Height;
+			const float A = i * 2.4f + Range(-0.4f, 0.4f);
+			const FVector3f Dir = FVector3f(FMath::Cos(A), FMath::Sin(A), Range(0.45f, 0.9f)).GetSafeNormal();
+			const float Length = Height * Range(0.3f, 0.42f) * (1.15f - T * 0.4f);
+			const float LeafSize = Variant == TreeBirch ? 300.0f : 420.0f;
+			const TArray<FVector3f> Limb = Branch(Axis(Z), Dir, Length, FMath::Max(TrunkRadius(Z) * 0.5f, 4.0f), 0.25f, LeafSize, false);
+			const float SideA = A + (Rand() < 0.5f ? 0.8f : -0.8f);
+			const FVector3f SideDir = FVector3f(FMath::Cos(SideA), FMath::Sin(SideA), 0.7f).GetSafeNormal();
+			Branch(Limb[2], SideDir, Length * 0.5f, FMath::Max(TrunkRadius(Z) * 0.25f, 2.5f), 0.2f, LeafSize * 0.8f, false);
+		}
+		Out.Tips.Add({ FVector(Axis(Height * 0.97f)), Variant == TreeBirch ? 320.0f : 460.0f });
+		break;
+	}
+	}
+
+	Out.TrunkRadius = Radius;
+	Out.TrunkHeight = TrunkTop;
+
+	UStaticMesh* Mesh = NewObject<UStaticMesh>(this, *FString::Printf(TEXT("SM_Tree%d"), static_cast<int32>(Variant)));
+	Mesh->GetStaticMaterials().Add(FStaticMaterial(BarkMaterial, TEXT("Bark"), TEXT("Bark")));
+	UStaticMesh::FBuildMeshDescriptionsParams Params;
+	Params.bFastBuild = true;
+	Params.bBuildSimpleCollision = false;
+	Mesh->BuildFromMeshDescriptions({ &Description }, Params);
+	return Mesh;
 }
 
 void ATerrainStreamer::Tick(float DeltaTime)
@@ -408,7 +646,6 @@ void ATerrainStreamer::UpdateGrass(const FVector& ViewLocation, double Deadline)
 			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			Component->SetCastShadow(false);
 			Component->NumCustomDataFloats = 3;
-			Component->SetCullDistances(GrassRadius * 0.75f, GrassRadius);
 			Component->SetupAttachment(RootComponent);
 			Component->RegisterComponent();
 			AllParts.Add(Component);
@@ -662,6 +899,12 @@ void ATerrainStreamer::BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps 
 		Transforms.Reserve(Instances.Num());
 		for (const FPropBatch::FInstance& Instance : Instances)
 		{
+			// Trees are placed at their base with a uniform scale in Size.
+			if (Part >= Tree0)
+			{
+				Transforms.Add(FTransform(Instance.Rotation, Instance.Center, Instance.Size));
+				continue;
+			}
 			const FVector Scale = Instance.Size / MeshSize;
 			const FVector Location = Instance.Center - Instance.Rotation.RotateVector(Bounds.GetCenter() * Scale);
 			Transforms.Add(FTransform(Instance.Rotation, Location, Scale));
@@ -743,15 +986,19 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) 
 			const FRotator Spin(0.0f, Tint * 360.0f, 0.0f);
 			const FVector Ground(PX, PY, S.Height);
 
-			// Canopies are clusters of scanned foliage around the top of a trunk.
-			auto Crown = [&](const FVector& Top, float Width, float Height, const FLinearColor& Leaves, int32 Clusters)
+			// A tree: the branching wood mesh, an invisible collider round the trunk, and scanned foliage
+			// clusters on each branch tip so the leaves grow from the branches.
+			auto PlaceTree = [&](int32 Variant, float Scale, const FLinearColor& BarkTint, const FLinearColor& Leaves, float LeafScale, float Flatten)
 			{
-				Batch.Add(Bush, Top, Spin, FVector(Width, Width, Height), Jitter(Leaves, Tint));
-				for (int32 i = 1; i < Clusters; ++i)
+				const FTreeTemplate& T = TreeTemplates[Variant];
+				Batch.Add(static_cast<EPropPart>(Tree0 + Variant), Ground, Spin, FVector(Scale), BarkTint);
+				Batch.Add(Trunk, Ground + FVector(0, 0, T.TrunkHeight * 0.5f * Scale), Spin, FVector(T.TrunkRadius * 2.0f * Scale, T.TrunkRadius * 2.0f * Scale, T.TrunkHeight * Scale), White);
+				for (int32 i = 0; i < T.Tips.Num(); ++i)
 				{
-					const float A = (Tint + i / static_cast<float>(Clusters)) * 2.0f * PI;
-					const FVector Offset(FMath::Cos(A) * Width * 0.3f, FMath::Sin(A) * Width * 0.3f, -Height * 0.15f);
-					Batch.Add(Bush, Top + Offset, FRotator(0.0f, A * 57.0f, 0.0f), FVector(Width, Width, Height) * 0.7f, Jitter(Leaves, Kind));
+					const FVector Tip = Ground + Spin.RotateVector(T.Tips[i].Position * Scale);
+					const float W = T.Tips[i].Size * Scale * LeafScale;
+					const float R = WorldGen::HashFloat(CX * 31 + i, CY, 700);
+					Batch.Add(Bush, Tip, FRotator(0.0f, R * 360.0f, 0.0f), FVector(W, W, W * Flatten), Jitter(Leaves, R));
 				}
 			};
 
@@ -770,58 +1017,37 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) 
 				{
 				case EBiome::Desert:
 				case EBiome::Savanna:
-				{
-					// Acacia: short trunk, flat spreading crown.
-					const float H = 500.0f * Size;
-					Batch.Add(Trunk, Ground + FVector(0, 0, H * 0.5f), Spin, FVector(50, 50, H), Bark, 0.0f, SurfConcrete);
-					Crown(Ground + FVector(0, 0, H + 100.0f), 950.0f * Size, 260.0f * Size, LeafDry, 3);
+					PlaceTree(TreeAcacia, Size, BarkWarm, LeafDry, 1.0f, 0.45f);
 					break;
-				}
 				case EBiome::Jungle:
-				{
-					// Tall emergent trees with broad, layered canopies.
-					const float H = 1800.0f * Size;
-					Batch.Add(Trunk, Ground + FVector(0, 0, H * 0.5f), Spin, FVector(100, 100, H), Bark, 0.0f, SurfConcrete);
-					Crown(Ground + FVector(0, 0, H), 1200.0f * Size, 600.0f * Size, LeafJungle, 4);
-					Crown(Ground + FVector(0, 0, 250.0f), 500.0f * Size, 400.0f * Size, LeafJungle, 1);
+					PlaceTree(TreeJungle, Size, BarkPale, LeafJungle, 1.0f, 0.7f);
 					break;
-				}
 				case EBiome::Taiga:
 				case EBiome::Tundra:
 				case EBiome::Snow:
 				{
-					// Conifer: foliage stacked narrower towards the top; frosted in the deep cold.
+					// Conifers, frosted in the deep cold.
 					const FLinearColor Needles = FMath::Lerp(LeafConifer, LeafFrost, Smooth(0.22f, 0.08f, S.Temperature));
-					const float H = 1300.0f * Size;
-					Batch.Add(Trunk, Ground + FVector(0, 0, H * 0.45f), Spin, FVector(45, 45, H * 0.9f), Bark, 0.0f, SurfConcrete);
-					for (int32 Tier = 0; Tier < 4; ++Tier)
-					{
-						const float T = Tier / 3.0f;
-						const float W = FMath::Lerp(450.0f, 150.0f, T) * Size;
-						Batch.Add(Bush, Ground + FVector(0, 0, FMath::Lerp(0.3f, 0.92f, T) * H), FRotator(0, Tier * 80.0f + Tint * 360.0f, 0), FVector(W, W, H * 0.3f), Jitter(Needles, Tint));
-					}
+					PlaceTree(Kind < 0.5f ? TreeConiferA : TreeConiferB, Size, BarkDark, Needles, 1.0f, 0.5f);
 					break;
 				}
 				default:
 				{
-					// Broadleaf, a few already turning gold or rust, with the odd conifer mixed in.
-					if (Kind < 0.18f)
+					// Broadleaf of several shapes, some birch, the odd conifer, a few already turning gold or rust.
+					if (Kind < 0.14f)
 					{
-						const float H = 1200.0f * Size;
-						Batch.Add(Trunk, Ground + FVector(0, 0, H * 0.45f), Spin, FVector(45, 45, H * 0.9f), Bark, 0.0f, SurfConcrete);
-						for (int32 Tier = 0; Tier < 3; ++Tier)
-						{
-							const float W = FMath::Lerp(420.0f, 170.0f, Tier / 2.0f) * Size;
-							Batch.Add(Bush, Ground + FVector(0, 0, FMath::Lerp(0.35f, 0.9f, Tier / 2.0f) * H), FRotator(0, Tier * 110.0f, 0), FVector(W, W, H * 0.35f), Jitter(LeafConifer, Tint));
-						}
+						PlaceTree(Kind < 0.07f ? TreeConiferA : TreeConiferB, Size, BarkDark, LeafConifer, 1.0f, 0.5f);
 						break;
 					}
 					FLinearColor Leaves = LeafTemperate;
 					if (Kind > 0.93f) Leaves = LeafGold;
 					else if (Kind > 0.88f) Leaves = LeafRust;
-					const float H = 450.0f * Size;
-					Batch.Add(Trunk, Ground + FVector(0, 0, H * 0.5f), Spin, FVector(60, 60, H), Bark, 0.0f, SurfConcrete);
-					Crown(Ground + FVector(0, 0, H + 250.0f * Size), 750.0f * Size, 650.0f * Size, Leaves, 3);
+					if (Kind < 0.24f)
+					{
+						PlaceTree(TreeBirch, Size, BarkBirch, Leaves, 0.9f, 0.9f);
+						break;
+					}
+					PlaceTree(TreeBroadleafA + FMath::FloorToInt(Tint * 2.999f), Size, BarkWarm, Leaves, 1.0f, 0.85f);
 					break;
 				}
 				}
@@ -1230,8 +1456,10 @@ UHierarchicalInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPa
 		Component->SetMobility(EComponentMobility::Movable);
 		Component->SetStaticMesh(PartMeshes[Part]);
 		Component->SetMaterial(0, PartMaterials[Part]);
-		// Trunks, rocks and buildings are solid so you can weave between them; foliage stays soft.
-		if (Part == Bush)
+		// Trunk colliders, rocks and buildings are solid so you can weave between trees; foliage and the
+		// tree wood meshes themselves are not (the colliders stand in for trunks). Vegetation dissolves
+		// in and out smoothly by distance in its materials, so there's no hard cull distance here.
+		if (Part == Bush || Part >= Tree0)
 		{
 			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		}
@@ -1240,11 +1468,12 @@ UHierarchicalInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPa
 			Component->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 			Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 		}
-		Component->NumCustomDataFloats = 5;
-		if (Part == Rock || Part == Bush || Part == Trunk)
+		if (Part == Trunk)
 		{
-			Component->SetCullDistances(DetailCullDistance * 0.8f, DetailCullDistance);
+			Component->SetHiddenInGame(true);
+			Component->SetCastShadow(false);
 		}
+		Component->NumCustomDataFloats = 5;
 		Component->SetupAttachment(RootComponent);
 		Component->RegisterComponent();
 		AllParts.Add(Component);

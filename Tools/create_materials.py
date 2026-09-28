@@ -106,6 +106,22 @@ class Graph:
         return comps
 
 
+def distance_dissolve(g, start_cm, end_cm, mask=None, mask_out=""):
+    """Opacity mask that dithers smoothly to nothing between start and end distance (no hard pop)."""
+    depth = g.node(unreal.MaterialExpressionPixelDepth)
+    fade = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, depth, g.const(start_cm)), g.const(1.0 / (end_cm - start_cm))))
+    keep = g.op(unreal.MaterialExpressionSubtract, g.const(1.0), fade)
+    if mask is not None:
+        keep = g.mul(keep, mask, "", mask_out)
+    dither = g.node(unreal.MaterialExpressionMaterialFunctionCall)
+    dither.set_material_function(unreal.load_asset("/Engine/Functions/Engine_MaterialFunctions02/Utility/DitherTemporalAA.DitherTemporalAA"))
+    return g.link(keep, dither, "Alpha Threshold")
+
+
+# Vegetation (built within ~1.6 km) dissolves over this band so the edge is never seen popping.
+VEG_FADE = (80000.0, 125000.0)
+
+
 def finish(mat):
     lib.recompile_material(mat)
     unreal.EditorAssetLibrary.save_loaded_asset(mat)
@@ -235,7 +251,9 @@ finish(m)
 # Rocks: scanned rock mesh normals with world-projected basalt. Custom data [0..2] tint.
 m = new_material("M_RockMesh")
 m.set_editor_property("used_with_instanced_static_meshes", True)
+m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
 g = Graph(m)
+lib.connect_material_property(distance_dissolve(g, *VEG_FADE), "", MP.MP_OPACITY_MASK)
 cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
 tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
 mesh_uv = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=0)
@@ -259,10 +277,35 @@ mesh_uv = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=0)
 leaves = g.sample(tex("T_Bush_D"), mesh_uv)
 color = g.mul(leaves, tint)
 lib.connect_material_property(color, "", MP.MP_BASE_COLOR)
-lib.connect_material_property(leaves, "A", MP.MP_OPACITY_MASK)
+lib.connect_material_property(distance_dissolve(g, *VEG_FADE, leaves, "A"), "", MP.MP_OPACITY_MASK)
 lib.connect_material_property(g.sample(tex("T_Bush_N"), mesh_uv, normal=True), "", MP.MP_NORMAL)
 lib.connect_material_property(g.mul(color, g.color(0.6, 0.8, 0.3)), "", MP.MP_SUBSURFACE_COLOR)
 lib.connect_material_property(g.const(0.75), "", MP.MP_ROUGHNESS)
+finish(m)
+
+# ---------------------------------------------------------------------------------------------
+# Bark for runtime-built tree meshes: UV U runs around the trunk, V along it (1 per 1.5 m).
+# Noise stretched along the trunk gives vertical furrows. Custom data [0..2] tint.
+m = new_material("M_Bark")
+m.set_editor_property("used_with_instanced_static_meshes", True)
+m.set_editor_property("two_sided", True)
+m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+g = Graph(m)
+lib.connect_material_property(distance_dissolve(g, *VEG_FADE), "", MP.MP_OPACITY_MASK)
+cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
+tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
+uv = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=0)
+furrow_uv = g.mul(uv, g.op(unreal.MaterialExpressionAppendVector, g.const(3.0), g.const(0.35)))
+ridge_uv = g.mul(uv, g.op(unreal.MaterialExpressionAppendVector, g.const(7.0), g.const(0.9)))
+furrow = g.mask(g.sample(tex("T_Perlin_Noise_M"), furrow_uv), r=True)
+ridge = g.mask(g.sample(tex("T_Perlin_Noise_M"), ridge_uv), r=True)
+relief = g.saturate(g.mul(g.mul(furrow, ridge), g.const(2.6)))
+bark = g.lerp(g.color(0.03, 0.024, 0.018), g.color(0.17, 0.14, 0.11), relief)
+lib.connect_material_property(g.mul(bark, tint), "", MP.MP_BASE_COLOR)
+normal_uv = g.mul(uv, g.op(unreal.MaterialExpressionAppendVector, g.const(2.0), g.const(0.5)))
+lib.connect_material_property(g.sample(tex("T_Detail_Rocky_N"), normal_uv, normal=True), "", MP.MP_NORMAL)
+lib.connect_material_property(g.const(0.92), "", MP.MP_ROUGHNESS)
+lib.connect_material_property(g.const(0.2), "", MP.MP_SPECULAR)
 finish(m)
 
 # ---------------------------------------------------------------------------------------------
@@ -272,7 +315,9 @@ m = new_material("M_Grass")
 m.set_editor_property("used_with_instanced_static_meshes", True)
 m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_TWO_SIDED_FOLIAGE)
 m.set_editor_property("two_sided", True)
+m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
 g = Graph(m)
+lib.connect_material_property(distance_dissolve(g, 7000.0, 11500.0), "", MP.MP_OPACITY_MASK)
 cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
 tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
 vc = g.node(unreal.MaterialExpressionVertexColor)

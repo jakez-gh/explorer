@@ -89,7 +89,8 @@ private:
 		Cube,
 		Rock,
 		Bush,
-		Trunk, // cylinder that fades out with vegetation
+		Trunk, // invisible collider around tree trunks
+		Tree0, Tree1, Tree2, Tree3, Tree4, Tree5, Tree6, Tree7, // runtime-built tree wood meshes
 		NumParts
 	};
 
@@ -103,6 +104,34 @@ private:
 		SurfGlass,
 		SurfGrass,
 	};
+
+	enum ETreeVariant : int32
+	{
+		TreeBroadleafA,
+		TreeBroadleafB,
+		TreeBroadleafC,
+		TreeConiferA,
+		TreeConiferB,
+		TreeAcacia,
+		TreeJungle,
+		TreeBirch,
+		NumTreeVariants
+	};
+
+	/** A generated tree: where its branch tips are (foliage goes there) and its trunk size (for collision). */
+	struct FTreeTemplate
+	{
+		struct FTip
+		{
+			FVector Position;
+			float Size;
+		};
+		TArray<FTip> Tips;
+		float TrunkRadius = 30.0f;
+		float TrunkHeight = 500.0f;
+	};
+
+	UStaticMesh* CreateTreeMesh(ETreeVariant Variant, FTreeTemplate& OutTemplate);
 
 	enum class EProps : uint8
 	{
@@ -160,6 +189,11 @@ private:
 	void ReleaseChunk(FChunk& Chunk);
 	UProceduralMeshComponent* AcquireMesh();
 	UHierarchicalInstancedStaticMeshComponent* AcquirePart(EPropPart Part);
+
+	FTreeTemplate TreeTemplates[NumTreeVariants];
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> BarkMaterial;
 
 	TMap<FIntPoint, FChunk> Chunks;
 	TMap<FIntPoint, UProceduralMeshComponent*> FarTiles;
