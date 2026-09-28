@@ -35,8 +35,20 @@ struct FWorldSample
 	FLinearColor Color = FLinearColor::Black;
 	// 0 = dry, 1 = glossy.
 	float Wetness = 0.0f;
-	// Chance per ~16 m cell of a tree (or cactus) growing here.
+	// Chance per ~16 m cell of a tree (or shrub) growing here.
 	float TreeDensity = 0.0f;
+
+	// Terrain material layers, 0..1 each (grass is the base layer).
+	float Sand = 0.0f;
+	float Forest = 0.0f;
+	float Snow = 0.0f;
+	// Exposed rock regardless of slope (volcanoes, high ridges).
+	float Rock = 0.0f;
+	// 0 = lush, 1 = parched: yellows grass and turns rock to sandstone.
+	float Dryness = 0.0f;
+
+	// 0..1 inside a volcano's cone; 1 at the rim.
+	float Volcano = 0.0f;
 };
 
 /**
@@ -52,6 +64,10 @@ namespace WorldGen
 	// Colour of exposed rock and snow, applied on slopes and in the cold.
 	FLinearColor RockColor();
 	FLinearColor SnowColor();
+
+	// Rare volcanoes: returns false if this ~40 km cell has none. Crater centre at ground level of the rim.
+	bool FindVolcano(int32 CellX, int32 CellY, FVector2D& OutCenter, float& OutRadius, float& OutHeight);
+	double VolcanoCellSize();
 
 	uint32 Hash(int32 X, int32 Y, uint32 Seed);
 	// Uniform in [0, 1).

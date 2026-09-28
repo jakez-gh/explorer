@@ -11,8 +11,12 @@ class UInputMappingContext;
 class UInputAction;
 
 /**
- * Dreamlike first-person flight: you glide forward with gentle momentum, bank into turns,
- * and the ground softly pushes you away instead of stopping you.
+ * Controller-first, dreamlike flight.
+ *   Left stick   steer: X turns (and banks into the turn), Y pitches the nose.
+ *   Right trigger throttle: speed follows the pull directly; released = hover in place.
+ *   Right stick  look: the view points where the stick points, and returns forward when released.
+ *   Bumpers      rise / sink.
+ * The ground gently pushes you away instead of stopping you. Progress is saved and restored.
  */
 UCLASS()
 class EXPLORER_API AFlightPawn : public APawn
@@ -22,6 +26,9 @@ class EXPLORER_API AFlightPawn : public APawn
 public:
 	AFlightPawn();
 
+	float GetFlightYaw() const { return FlightYaw; }
+	float GetFlightPitch() const { return FlightPitch; }
+
 protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Flight")
 	USphereComponent* CollisionComponent;
@@ -29,65 +36,54 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Flight")
 	UCameraComponent* CameraComponent;
 
-	// Input assets are optional: any left unset are created in code with default
-	// gamepad + keyboard/mouse bindings.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Input")
-	UInputMappingContext* DefaultMappingContext;
+	// Speed at full trigger.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Speed")
+	float MaxFlightSpeed = 40000.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Input")
-	UInputAction* MoveAction;
+	// >1 gives finer control at low trigger pull.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Speed")
+	float ThrottleCurve = 2.2f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Input")
-	UInputAction* LookAction;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Speed")
+	float RiseSpeed = 2500.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Input")
-	UInputAction* AscendAction;
+	// Degrees per second at full stick.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
+	float TurnRate = 60.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Input")
-	UInputAction* BoostAction;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
+	float PitchRate = 45.0f;
 
-	// Speed when no throttle is held.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Movement")
-	float CruiseSpeed = 2500.0f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
+	float MaxPitch = 75.0f;
 
-	// Speed at full throttle, before boost.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Movement")
-	float MaxFlightSpeed = 9000.0f;
+	// How quickly the nose drifts back to level when not pitching (per second).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
+	float AutoLevelRate = 0.4f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Movement")
-	float BoostMultiplier = 3.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
+	bool bInvertPitch = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Movement")
-	float AscendSpeed = 3000.0f;
-
-	// How quickly speed eases towards the throttle setting (per second).
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Movement")
-	float SpeedResponse = 0.9f;
-
-	// How quickly the direction of travel follows the view (per second); lower glides more.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Movement")
-	float GlideResponse = 1.6f;
-
-	// Degrees per second at full turn input.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Turning")
-	float TurnRate = 55.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Turning")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
 	float MaxBankAngle = 35.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Turning")
-	float BankResponse = 2.5f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
+	float BankResponse = 3.0f;
 
-	// Degrees per second at full stick deflection.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Input")
-	float GamepadLookRate = 70.0f;
+	// Look angle at full right-stick deflection.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Look")
+	float LookYawRange = 120.0f;
 
-	// Degrees per mouse count.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Input")
-	float MouseSensitivity = 0.12f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Look")
+	float LookPitchRange = 70.0f;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Input")
-	bool bInvertPitch = false;
+	// How tightly the view follows the stick (per second).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Look")
+	float LookResponse = 12.0f;
+
+	// Degrees per mouse count (keyboard/mouse fallback).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Look")
+	float MouseSensitivity = 0.15f;
 
 	// Below this height above ground or water, you're gently lifted.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Feel")
@@ -96,28 +92,51 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Feel")
 	float BaseFieldOfView = 90.0f;
 
-	// Extra field of view at top boosted speed.
+	// Extra field of view at top speed.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Feel")
 	float SpeedFieldOfView = 20.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Feel")
-	float BobAmplitude = 15.0f;
+	float BobAmplitude = 6.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Feel")
-	float BobPeriod = 6.0f;
+	float BobPeriod = 7.0f;
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual void Tick(float DeltaTime) override;
 
 private:
-	void CreateDefaultInput();
-	void Look(const FInputActionValue& Value);
+	void CreateInput();
+	void OnMouseLook(const FInputActionValue& Value);
+	void SaveProgress() const;
 
-	FVector Velocity = FVector::ZeroVector;
-	float Speed = 0.0f;
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> MappingContext;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> SteerAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> LookAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> MouseLookAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> ThrottleAction;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> RiseAction;
+
+	float FlightYaw = 0.0f;
+	float FlightPitch = 0.0f;
 	float Bank = 0.0f;
-	float YawRate = 0.0f;
-	float LastYaw = 0.0f;
+	FVector2D Look = FVector2D::ZeroVector;
+	FVector2D MouseLook = FVector2D::ZeroVector;
+	float MouseIdleTime = 0.0f;
+	float Speed = 0.0f;
 	float BobTime = 0.0f;
+	float SaveTimer = 0.0f;
 };

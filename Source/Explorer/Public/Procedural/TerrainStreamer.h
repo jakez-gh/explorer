@@ -12,9 +12,10 @@ class UMaterialInterface;
 
 /**
  * Endless procedural world. Keeps a disc of square chunks around the player: full detail and
- * collision up close, coarser terrain in the distance, trees and villages nearby, and large
- * landmarks (cities, floating islands) everywhere in view. Everything is a pure function of
- * world position (see WorldGen), so chunks line up seamlessly and places are always the same.
+ * collision up close, coarser terrain in the distance, vegetation and small settlements nearby,
+ * and large landmarks (cities, lighthouses, volcanoes, floating islands) everywhere in view.
+ * Everything is a pure function of world position (see WorldGen), so chunks line up seamlessly
+ * and every place is the same each time you return.
  */
 UCLASS()
 class EXPLORER_API ATerrainStreamer : public AActor
@@ -35,7 +36,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
 	int32 ViewRadius = 17;
 
-	// Chunks within this radius get trees, rocks and villages.
+	// Chunks within this radius get vegetation, rocks and small settlements.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
 	int32 DetailRadius = 4;
 
@@ -58,9 +59,13 @@ public:
 	static bool FindVillage(int32 CellX, int32 CellY, FVector& OutCenter);
 	static bool FindCity(int32 CellX, int32 CellY, FVector& OutCenter);
 	static bool FindFloatingIsland(int32 CellX, int32 CellY, FVector& OutTop, float& OutRadius);
+	static bool FindLighthouse(int32 CellX, int32 CellY, FVector& OutBase);
+	static bool FindStoneCircle(int32 CellX, int32 CellY, FVector& OutCenter);
 	static double VillageCellSize();
 	static double CityCellSize();
 	static double IslandCellSize();
+	static double LighthouseCellSize();
+	static double StoneCircleCellSize();
 
 private:
 	enum EPropPart : uint8
@@ -69,7 +74,21 @@ private:
 		Cone,
 		Sphere,
 		Cube,
+		Rock,
+		Bush,
+		Trunk, // cylinder that fades out with vegetation
 		NumParts
+	};
+
+	// Surface selector for M_Prop (custom data 4).
+	enum ESurface : uint8
+	{
+		SurfRock,
+		SurfConcrete,
+		SurfBrick,
+		SurfSlate,
+		SurfGlass,
+		SurfGrass,
 	};
 
 	enum class EProps : uint8
@@ -91,10 +110,17 @@ private:
 	/** Instances collected for one chunk before they're pushed to its components. */
 	struct FPropBatch
 	{
-		TArray<FTransform> Transforms[NumParts];
+		struct FInstance
+		{
+			FVector Center;
+			FRotator Rotation;
+			FVector Size;
+		};
+		TArray<FInstance> Instances[NumParts];
 		TArray<float> CustomData[NumParts];
 
-		void Add(EPropPart Part, const FVector& Center, const FRotator& Rotation, const FVector& SizeCm, const FLinearColor& Color, float Glow = 0.0f);
+		// Size is the full extent in cm; the part's mesh is scaled to fit and centred on Center.
+		void Add(EPropPart Part, const FVector& Center, const FRotator& Rotation, const FVector& SizeCm, const FLinearColor& Color, float Glow = 0.0f, ESurface Surface = SurfRock);
 	};
 
 	float ChunkWorldSize() const { return ChunkResolution * GridSpacing; }
@@ -105,7 +131,10 @@ private:
 	void BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps Level);
 	void AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddVillages(const FIntPoint& Coord, FPropBatch& Batch) const;
+	void AddStoneCircles(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddCities(const FIntPoint& Coord, FPropBatch& Batch) const;
+	void AddLighthouses(const FIntPoint& Coord, FPropBatch& Batch) const;
+	void AddVolcanoGlow(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddFloatingIslands(const FIntPoint& Coord, FPropBatch& Batch) const;
 	bool ChunkContains(const FIntPoint& Coord, const FVector& Location) const;
 
@@ -121,10 +150,10 @@ private:
 	UPROPERTY(EditAnywhere, Category = "Terrain|Assets")
 	TObjectPtr<UMaterialInterface> TerrainMaterial;
 
-	UPROPERTY(EditAnywhere, Category = "Terrain|Assets")
-	TObjectPtr<UMaterialInterface> PropMaterial;
+	// Materials and meshes indexed by EPropPart.
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInterface>> PartMaterials;
 
-	// Engine basic shapes, indexed by EPropPart.
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UStaticMesh>> PartMeshes;
 

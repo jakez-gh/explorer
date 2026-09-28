@@ -67,6 +67,22 @@ namespace WorldGen
 		return FLinearColor(FColor((Hex >> 16) & 0xFF, (Hex >> 8) & 0xFF, Hex & 0xFF));
 	}
 
+	double VolcanoCellSize() { return 4000000.0; }
+
+	bool FindVolcano(int32 CX, int32 CY, FVector2D& OutCenter, float& OutRadius, float& OutHeight)
+	{
+		if (HashFloat(CX, CY, 900) > 0.35f)
+		{
+			return false;
+		}
+		// Keep the cone well inside its cell so only one cell ever needs checking.
+		OutCenter = FVector2D((CX + FMath::Lerp(0.25f, 0.75f, HashFloat(CX, CY, 901))) * VolcanoCellSize(),
+			(CY + FMath::Lerp(0.25f, 0.75f, HashFloat(CX, CY, 902))) * VolcanoCellSize());
+		OutRadius = FMath::Lerp(350000.0f, 700000.0f, HashFloat(CX, CY, 903));
+		OutHeight = FMath::Lerp(120000.0f, 250000.0f, HashFloat(CX, CY, 904));
+		return true;
+	}
+
 	FLinearColor RockColor() { return Srgb(0x77706A); }
 	FLinearColor SnowColor() { return Srgb(0xF2F4FA); }
 
@@ -112,10 +128,32 @@ namespace WorldGen
 
 		float H = Base + Hills + Mountains;
 
+		// Volcanoes: a broad cone with a crater, rising from land or straight out of the sea.
+		float VolcanoRim = 0.0f;
+		{
+			const int32 CX = FMath::FloorToInt(WorldX / VolcanoCellSize());
+			const int32 CY = FMath::FloorToInt(WorldY / VolcanoCellSize());
+			FVector2D Center;
+			float Radius, Peak;
+			if (FindVolcano(CX, CY, Center, Radius, Peak))
+			{
+				const float D = FVector2D::Distance(Center, FVector2D(WorldX, WorldY)) / Radius;
+				if (D < 1.0f)
+				{
+					const float Cone = FMath::Pow(1.0f - D, 1.6f) * Peak * 0.01f;
+					const float Crater = Smooth(0.14f, 0.05f, D) * Peak * 0.01f * 0.35f;
+					// Lava-carved gullies running down the flanks, deepest mid-slope.
+					const float Gullies = (Ridged(X / 450.0, Y / 450.0, 3, OffRidges) - 0.55f) * 70.0f * FMath::Sin(D * PI);
+					H = FMath::Max(H, H * D + Cone - Crater + Gullies);
+					VolcanoRim = Smooth(0.85f, 0.35f, D);
+				}
+			}
+		}
+
 		// Climate (~20-35 km zones), cooled by altitude.
 		float Temperature = 0.5f + Fbm(X / 34000.0, Y / 34000.0, 3, OffTemperature) * 0.9f;
 		const float Moisture = FMath::Clamp(0.5f + Fbm(X / 22000.0, Y / 22000.0, 3, OffMoisture) * 0.9f, 0.0f, 1.0f);
-		Temperature = FMath::Clamp(Temperature - FMath::Max(H, 0.0f) / 1400.0f * 0.45f, 0.0f, 1.0f);
+		Temperature = FMath::Clamp(Temperature - FMath::Max(H, 0.0f) / 2600.0f * 0.45f, 0.0f, 1.0f);
 
 		const float Hot = Smooth(0.56f, 0.72f, Temperature);
 		const float Cold = Smooth(0.36f, 0.22f, Temperature);
@@ -199,6 +237,21 @@ namespace WorldGen
 			Out.Biome = EBiome::Ocean;
 			Out.TreeDensity = 0.0f;
 			Out.Wetness = 1.0f;
+		}
+
+		// Material layers for the photoreal terrain.
+		Out.Dryness = FMath::Clamp(Smooth(0.55f, 0.25f, Moisture) * Smooth(0.35f, 0.65f, Temperature) + Hot * Mid * 0.4f, 0.0f, 1.0f);
+		Out.Forest = FMath::Clamp((Weights[2] + Weights[4] + Weights[6]) / TotalWeight, 0.0f, 1.0f) * (1.0f - Beach) * (1.0f - Snow);
+		Out.Sand = FMath::Max(FMath::Max(Desertness * (1.0f - Ranges), Beach), H < 0.0f ? 1.0f : 0.0f);
+		Out.Snow = Snow;
+		Out.Rock = FMath::Max(Smooth(0.55f, 0.85f, Ridge) * Ranges, VolcanoRim);
+		Out.Volcano = VolcanoRim;
+		if (VolcanoRim > 0.0f)
+		{
+			// Dark, barren volcanic rock: no sandstone, sparse growth, snow only right at the summit.
+			Out.TreeDensity *= 1.0f - VolcanoRim;
+			Out.Dryness *= 1.0f - VolcanoRim;
+			Out.Snow *= Smooth(0.7f, 0.95f, VolcanoRim);
 		}
 
 		Out.Height = H * 100.0f;

@@ -1,4 +1,5 @@
 #include "Flight/FlightPawn.h"
+#include "Game/ExplorerSaveGame.h"
 #include "Procedural/WorldGen.h"
 #include "Camera/CameraComponent.h"
 #include "Components/SphereComponent.h"
@@ -13,28 +14,40 @@
 AFlightPawn::AFlightPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	bUseControllerRotationPitch = true;
-	bUseControllerRotationYaw = true;
-	bUseControllerRotationRoll = true;
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationYaw = false;
+	bUseControllerRotationRoll = false;
 
 	CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("Collision"));
 	CollisionComponent->InitSphereRadius(50.0f);
 	CollisionComponent->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
 	RootComponent = CollisionComponent;
 
+	// The camera is aimed explicitly each tick from heading, bank and look.
 	CameraComponent = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	CameraComponent->SetupAttachment(RootComponent);
-	CameraComponent->bUsePawnControlRotation = true;
+	CameraComponent->bUsePawnControlRotation = false;
 }
 
 void AFlightPawn::BeginPlay()
 {
 	Super::BeginPlay();
 
-	Speed = CruiseSpeed;
-	Velocity = GetActorForwardVector() * Speed;
-	LastYaw = GetControlRotation().Yaw;
+	FlightYaw = GetActorRotation().Yaw;
+	FlightPitch = FMath::Clamp(GetActorRotation().Pitch, -MaxPitch, MaxPitch);
+	SetActorRotation(FRotator(0.0f, FlightYaw, 0.0f));
 	CameraComponent->SetFieldOfView(BaseFieldOfView);
+}
+
+void AFlightPawn::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	SaveProgress();
+	Super::EndPlay(EndPlayReason);
+}
+
+void AFlightPawn::SaveProgress() const
+{
+	UExplorerSaveGame::Save(GetActorLocation(), FlightYaw, FlightPitch);
 }
 
 namespace
@@ -69,94 +82,76 @@ namespace
 	}
 }
 
-void AFlightPawn::CreateDefaultInput()
+void AFlightPawn::CreateInput()
 {
-	if (!MoveAction)
-	{
-		MoveAction = MakeAction(this, TEXT("IA_Move"), EInputActionValueType::Axis2D);
-	}
-	if (!LookAction)
-	{
-		LookAction = MakeAction(this, TEXT("IA_Look"), EInputActionValueType::Axis2D);
-	}
-	if (!AscendAction)
-	{
-		AscendAction = MakeAction(this, TEXT("IA_Ascend"), EInputActionValueType::Axis1D);
-	}
-	if (!BoostAction)
-	{
-		BoostAction = MakeAction(this, TEXT("IA_Boost"), EInputActionValueType::Boolean);
-	}
-	if (DefaultMappingContext)
+	if (MappingContext)
 	{
 		return;
 	}
 
-	UInputMappingContext* Context = NewObject<UInputMappingContext>(this, TEXT("IMC_Flight"));
+	SteerAction = MakeAction(this, TEXT("IA_Steer"), EInputActionValueType::Axis2D);
+	LookAction = MakeAction(this, TEXT("IA_Look"), EInputActionValueType::Axis2D);
+	MouseLookAction = MakeAction(this, TEXT("IA_MouseLook"), EInputActionValueType::Axis2D);
+	ThrottleAction = MakeAction(this, TEXT("IA_Throttle"), EInputActionValueType::Axis1D);
+	RiseAction = MakeAction(this, TEXT("IA_Rise"), EInputActionValueType::Axis1D);
 
-	// Move: X = turn (banks), Y = throttle.
-	AddModifier<UInputModifierDeadZone>(Context, Context->MapKey(MoveAction, EKeys::Gamepad_Left2D));
-	MapKeyToAxis(Context, MoveAction, EKeys::W, true, false);
-	MapKeyToAxis(Context, MoveAction, EKeys::S, true, true);
-	MapKeyToAxis(Context, MoveAction, EKeys::D, false, false);
-	MapKeyToAxis(Context, MoveAction, EKeys::A, false, true);
+	MappingContext = NewObject<UInputMappingContext>(this, TEXT("IMC_Flight"));
 
-	// Look: X = yaw, Y = pitch (positive = nose up). Gamepad is a rate, mouse is a delta.
-	{
-		FEnhancedActionKeyMapping& Mapping = Context->MapKey(LookAction, EKeys::Gamepad_Right2D);
-		AddModifier<UInputModifierDeadZone>(Context, Mapping);
-		AddModifier<UInputModifierScaleByDeltaTime>(Context, Mapping);
-		AddModifier<UInputModifierScalar>(Context, Mapping)->Scalar = FVector(GamepadLookRate);
-	}
-	{
-		FEnhancedActionKeyMapping& Mapping = Context->MapKey(LookAction, EKeys::Mouse2D);
-		AddModifier<UInputModifierScalar>(Context, Mapping)->Scalar = FVector(MouseSensitivity);
-	}
+	// Gamepad (primary).
+	AddModifier<UInputModifierDeadZone>(MappingContext, MappingContext->MapKey(SteerAction, EKeys::Gamepad_Left2D));
+	AddModifier<UInputModifierDeadZone>(MappingContext, MappingContext->MapKey(LookAction, EKeys::Gamepad_Right2D));
+	MappingContext->MapKey(ThrottleAction, EKeys::Gamepad_RightTriggerAxis);
+	MappingContext->MapKey(RiseAction, EKeys::Gamepad_RightShoulder);
+	AddModifier<UInputModifierNegate>(MappingContext, MappingContext->MapKey(RiseAction, EKeys::Gamepad_LeftShoulder));
 
-	// Ascend: triggers on gamepad, E/Q or Space/Ctrl on keyboard.
-	Context->MapKey(AscendAction, EKeys::Gamepad_RightTriggerAxis);
-	AddModifier<UInputModifierNegate>(Context, Context->MapKey(AscendAction, EKeys::Gamepad_LeftTriggerAxis));
-	Context->MapKey(AscendAction, EKeys::E);
-	AddModifier<UInputModifierNegate>(Context, Context->MapKey(AscendAction, EKeys::Q));
-	Context->MapKey(AscendAction, EKeys::SpaceBar);
-	AddModifier<UInputModifierNegate>(Context, Context->MapKey(AscendAction, EKeys::LeftControl));
-
-	// Boost: Shift, or a bumper / left stick click.
-	Context->MapKey(BoostAction, EKeys::LeftShift);
-	Context->MapKey(BoostAction, EKeys::Gamepad_LeftShoulder);
-	Context->MapKey(BoostAction, EKeys::Gamepad_RightShoulder);
-	Context->MapKey(BoostAction, EKeys::Gamepad_LeftThumbstick);
-
-	DefaultMappingContext = Context;
+	// Keyboard and mouse (fallback): WASD steer, Space cruise, Shift full speed, E/Q rise/sink, mouse look.
+	MapKeyToAxis(MappingContext, SteerAction, EKeys::D, false, false);
+	MapKeyToAxis(MappingContext, SteerAction, EKeys::A, false, true);
+	MapKeyToAxis(MappingContext, SteerAction, EKeys::W, true, false);
+	MapKeyToAxis(MappingContext, SteerAction, EKeys::S, true, true);
+	AddModifier<UInputModifierScalar>(MappingContext, MappingContext->MapKey(ThrottleAction, EKeys::SpaceBar))->Scalar = FVector(0.45f);
+	MappingContext->MapKey(ThrottleAction, EKeys::LeftShift);
+	MappingContext->MapKey(RiseAction, EKeys::E);
+	AddModifier<UInputModifierNegate>(MappingContext, MappingContext->MapKey(RiseAction, EKeys::Q));
+	AddModifier<UInputModifierScalar>(MappingContext, MappingContext->MapKey(MouseLookAction, EKeys::Mouse2D))->Scalar = FVector(MouseSensitivity);
 }
 
 void AFlightPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
-	CreateDefaultInput();
+	CreateInput();
 
 	if (APlayerController* PlayerController = GetController<APlayerController>())
 	{
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
 			ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer()))
 		{
-			Subsystem->AddMappingContext(DefaultMappingContext, 0);
+			Subsystem->AddMappingContext(MappingContext, 0);
 		}
 	}
 
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
 	{
 		// Continuous inputs are polled each tick so releasing them reliably reads as zero.
-		EnhancedInputComponent->BindActionValue(MoveAction);
-		EnhancedInputComponent->BindActionValue(AscendAction);
-		EnhancedInputComponent->BindActionValue(BoostAction);
-		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &AFlightPawn::Look);
+		EnhancedInputComponent->BindActionValue(SteerAction);
+		EnhancedInputComponent->BindActionValue(LookAction);
+		EnhancedInputComponent->BindActionValue(ThrottleAction);
+		EnhancedInputComponent->BindActionValue(RiseAction);
+		EnhancedInputComponent->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &AFlightPawn::OnMouseLook);
 	}
 	else
 	{
 		UE_LOG(LogTemp, Error, TEXT("FlightPawn requires EnhancedInputComponent; check DefaultInput.ini"));
 	}
+}
+
+void AFlightPawn::OnMouseLook(const FInputActionValue& Value)
+{
+	const FVector2D Delta = Value.Get<FVector2D>();
+	MouseLook.X = FMath::Clamp(MouseLook.X + Delta.X, -LookYawRange, LookYawRange);
+	MouseLook.Y = FMath::Clamp(MouseLook.Y + Delta.Y, -LookPitchRange, LookPitchRange);
+	MouseIdleTime = 0.0f;
 }
 
 void AFlightPawn::Tick(float DeltaTime)
@@ -167,43 +162,35 @@ void AFlightPawn::Tick(float DeltaTime)
 		return;
 	}
 
-	FVector2D Move = FVector2D::ZeroVector;
-	float Ascend = 0.0f;
-	bool bBoost = false;
+	FVector2D Steer = FVector2D::ZeroVector;
+	FVector2D Stick = FVector2D::ZeroVector;
+	float Throttle = 0.0f;
+	float Rise = 0.0f;
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
 	{
-		Move = EnhancedInputComponent->GetBoundActionValue(MoveAction).Get<FVector2D>();
-		Ascend = FMath::Clamp(EnhancedInputComponent->GetBoundActionValue(AscendAction).Get<float>(), -1.0f, 1.0f);
-		bBoost = EnhancedInputComponent->GetBoundActionValue(BoostAction).Get<bool>();
+		Steer = EnhancedInputComponent->GetBoundActionValue(SteerAction).Get<FVector2D>();
+		Stick = EnhancedInputComponent->GetBoundActionValue(LookAction).Get<FVector2D>();
+		Throttle = FMath::Clamp(EnhancedInputComponent->GetBoundActionValue(ThrottleAction).Get<float>(), 0.0f, 1.0f);
+		Rise = FMath::Clamp(EnhancedInputComponent->GetBoundActionValue(RiseAction).Get<float>(), -1.0f, 1.0f);
 	}
+	Steer.X = FMath::Clamp(Steer.X, -1.0f, 1.0f);
+	Steer.Y = FMath::Clamp(bInvertPitch ? -Steer.Y : Steer.Y, -1.0f, 1.0f);
 
-	// Turning input yaws; the bank follows from how fast we're actually turning, whatever the source.
-	AddControllerYawInput(Move.X * TurnRate * DeltaTime);
-
-	const FRotator Control = GetControlRotation();
-	const float MeasuredYawRate = FMath::FindDeltaAngleDegrees(LastYaw, Control.Yaw) / DeltaTime;
-	LastYaw = Control.Yaw;
-	YawRate = FMath::FInterpTo(YawRate, MeasuredYawRate, DeltaTime, 6.0f);
-	// Roll into the turn: turning left (negative yaw rate) lowers the left wing, which is positive roll here.
-	const float TargetBank = -FMath::Clamp(YawRate / TurnRate, -1.0f, 1.0f) * MaxBankAngle;
-	Bank = FMath::FInterpTo(Bank, TargetBank, DeltaTime, BankResponse);
-	if (Controller)
+	// Heading: turn and pitch at a rate set by the stick; the nose drifts back to level when left alone.
+	FlightYaw = FRotator::NormalizeAxis(FlightYaw + Steer.X * TurnRate * DeltaTime);
+	FlightPitch = FMath::Clamp(FlightPitch + Steer.Y * PitchRate * DeltaTime, -MaxPitch, MaxPitch);
+	if (FMath::Abs(Steer.Y) < 0.05f)
 	{
-		Controller->SetControlRotation(FRotator(Control.Pitch, Control.Yaw, Bank));
+		FlightPitch = FMath::FInterpTo(FlightPitch, 0.0f, DeltaTime, AutoLevelRate);
 	}
 
-	// Throttle eases speed between hovering, cruise and full speed; boost multiplies it.
-	float TargetSpeed = CruiseSpeed + FMath::Max(Move.Y, 0.0f) * (MaxFlightSpeed - CruiseSpeed) + FMath::Min(Move.Y, 0.0f) * CruiseSpeed;
-	if (bBoost)
-	{
-		TargetSpeed = FMath::Max(TargetSpeed, CruiseSpeed) * BoostMultiplier;
-	}
-	Speed = FMath::FInterpTo(Speed, TargetSpeed, DeltaTime, SpeedResponse);
+	// Bank into the turn in proportion to the stick; level out when it's released.
+	Bank = FMath::FInterpTo(Bank, Steer.X * MaxBankAngle, DeltaTime, BankResponse);
 
-	// Glide: the direction of travel drifts towards where we're looking.
-	const FVector Forward = FRotator(Control.Pitch, Control.Yaw, 0.0f).Vector();
-	const FVector Desired = Forward * Speed + FVector::UpVector * Ascend * AscendSpeed;
-	Velocity = FMath::VInterpTo(Velocity, Desired, DeltaTime, GlideResponse);
+	// Speed follows the trigger directly: released means stop and hover.
+	Speed = MaxFlightSpeed * FMath::Pow(Throttle, ThrottleCurve);
+	const FVector Forward = FRotator(FlightPitch, FlightYaw, 0.0f).Vector();
+	FVector Velocity = Forward * Speed + FVector::UpVector * Rise * RiseSpeed;
 
 	// Soft cushion above land and water, looking ahead so rising hills lift you before you reach them.
 	const FVector Location = GetActorLocation();
@@ -228,32 +215,48 @@ void AFlightPawn::Tick(float DeltaTime)
 	AddActorWorldOffset(Delta, true, &Hit);
 	if (Hit.bBlockingHit)
 	{
-		const FVector Remaining = FVector::VectorPlaneProject(Delta * (1.0f - Hit.Time), Hit.Normal);
-		Velocity = FVector::VectorPlaneProject(Velocity, Hit.Normal);
-		AddActorWorldOffset(Remaining, true);
+		AddActorWorldOffset(FVector::VectorPlaneProject(Delta * (1.0f - Hit.Time), Hit.Normal), true);
 	}
 	if (GetActorLocation().Z < Ground + 300.0f)
 	{
 		SetActorLocation(FVector(GetActorLocation().X, GetActorLocation().Y, Ground + 300.0f));
 	}
+	SetActorRotation(FRotator(0.0f, FlightYaw, 0.0f));
 
-	static const bool bDebug = FParse::Param(FCommandLine::Get(), TEXT("FlightDebug"));
-	if (bDebug && FMath::FloorToInt(BobTime) != FMath::FloorToInt(BobTime + DeltaTime))
+	// Look: the right stick points the view directly; the mouse drifts back to centre when left alone.
+	MouseIdleTime += DeltaTime;
+	if (MouseIdleTime > 0.6f)
 	{
-		UE_LOG(LogTemp, Display, TEXT("FlightDebug: fps=%.0f z=%.0f ground=%.0f ahead=%.0f alt=%.0f vel=%s speed=%.0f hit=%d pitch=%.1f"),
-			1.0f / DeltaTime, GetActorLocation().Z, Ground, GroundAhead, GetActorLocation().Z - Ground, *Velocity.ToCompactString(), Speed, Hit.bBlockingHit ? 1 : 0, Control.Pitch);
+		MouseLook = FMath::Vector2DInterpTo(MouseLook, FVector2D::ZeroVector, DeltaTime, 2.5f);
 	}
+	FVector2D TargetLook(Stick.X * LookYawRange + MouseLook.X, Stick.Y * LookPitchRange + MouseLook.Y);
+	TargetLook.X = FMath::Clamp(TargetLook.X, -LookYawRange, LookYawRange);
+	// Stop at straight up and straight down rather than tumbling over.
+	TargetLook.Y = FMath::Clamp(TargetLook.Y, -85.0f - FlightPitch, 85.0f - FlightPitch);
+	Look = FMath::Vector2DInterpTo(Look, TargetLook, DeltaTime, LookResponse);
+
+	const FQuat Body = FRotator(FlightPitch, FlightYaw, Bank).Quaternion();
+	const FQuat Head = FRotator(Look.Y, Look.X, 0.0f).Quaternion();
+	CameraComponent->SetWorldRotation(Body * Head);
 
 	// Widen the view with speed, and let the camera breathe.
-	const float SpeedAlpha = FMath::Clamp((Speed - CruiseSpeed) / (MaxFlightSpeed * BoostMultiplier - CruiseSpeed), 0.0f, 1.0f);
-	CameraComponent->SetFieldOfView(FMath::FInterpTo(CameraComponent->FieldOfView, BaseFieldOfView + SpeedFieldOfView * SpeedAlpha, DeltaTime, 2.0f));
+	const float SpeedAlpha = Speed / MaxFlightSpeed;
+	CameraComponent->SetFieldOfView(FMath::FInterpTo(CameraComponent->FieldOfView, BaseFieldOfView + SpeedFieldOfView * SpeedAlpha, DeltaTime, 3.0f));
 	BobTime += DeltaTime;
 	CameraComponent->SetRelativeLocation(FVector(0.0f, 0.0f, FMath::Sin(BobTime * 2.0f * PI / BobPeriod) * BobAmplitude));
-}
 
-void AFlightPawn::Look(const FInputActionValue& Value)
-{
-	const FVector2D LookAxisVector = Value.Get<FVector2D>();
-	AddControllerYawInput(LookAxisVector.X);
-	AddControllerPitchInput(bInvertPitch ? -LookAxisVector.Y : LookAxisVector.Y);
+	// Remember where we are.
+	SaveTimer += DeltaTime;
+	if (SaveTimer > 5.0f)
+	{
+		SaveTimer = 0.0f;
+		SaveProgress();
+	}
+
+	static const bool bDebug = FParse::Param(FCommandLine::Get(), TEXT("FlightDebug"));
+	if (bDebug && FMath::FloorToInt(BobTime) != FMath::FloorToInt(BobTime - DeltaTime))
+	{
+		UE_LOG(LogTemp, Display, TEXT("FlightDebug: fps=%.0f loc=%s alt=%.0f speed=%.0f yaw=%.1f pitch=%.1f bank=%.1f look=%s"),
+			1.0f / DeltaTime, *GetActorLocation().ToCompactString(), GetActorLocation().Z - Ground, Speed, FlightYaw, FlightPitch, Bank, *Look.ToString());
+	}
 }

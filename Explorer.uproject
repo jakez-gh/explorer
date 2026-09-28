@@ -22,12 +22,20 @@
 		{
 			"Name": "PythonScriptPlugin",
 			"Enabled": true,
-			"TargetAllowList": [ "Editor" ]
+			"TargetAllowList": [
+				"Editor"
+			]
 		},
 		{
 			"Name": "EditorScriptingUtilities",
 			"Enabled": true,
-			"TargetAllowList": [ "Editor" ]
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "AndroidFileServer",
+			"Enabled": false
 		}
 	]
 }

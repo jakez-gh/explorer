@@ -25,13 +25,21 @@ namespace
 		SeedVillage = 20,
 		SeedCity = 40,
 		SeedIsland = 60,
+		SeedLighthouse = 80,
+		SeedStones = 100,
 	};
 
 	constexpr double VillageCell = 250000.0;
 	constexpr double VillageRadius = 20000.0;
 	constexpr double CityCell = 900000.0;
 	constexpr double CityRadius = 45000.0;
-	constexpr double IslandCell = 700000.0;
+	constexpr double IslandCell = 900000.0;
+	constexpr double LighthouseCell = 500000.0;
+	constexpr double StoneCircleCell = 400000.0;
+	constexpr double StoneCircleRadius = 2500.0;
+
+	// Vegetation and rocks fade out beyond this distance; terrain colour carries forests further out.
+	constexpr float DetailCullDistance = 60000.0f;
 
 	float Smooth(float Edge0, float Edge1, float X)
 	{
@@ -39,7 +47,7 @@ namespace
 		return T * T * (3.0f - 2.0f * T);
 	}
 
-	FLinearColor Jitter(const FLinearColor& Color, float Random01, float Amount = 0.15f)
+	FLinearColor Jitter(const FLinearColor& Color, float Random01, float Amount = 0.12f)
 	{
 		return Color * (1.0f + (Random01 * 2.0f - 1.0f) * Amount);
 	}
@@ -53,6 +61,17 @@ namespace
 		float Next() { return WorldGen::HashFloat(X, Y, Seed * 7919u + static_cast<uint32>(Counter++)); }
 		float Range(float Min, float Max) { return FMath::Lerp(Min, Max, Next()); }
 	};
+
+	// Tints multiply the scanned textures, so 1 keeps them as photographed.
+	const FLinearColor White(1.0f, 1.0f, 1.0f);
+	const FLinearColor Bark(0.33f, 0.24f, 0.17f);
+	const FLinearColor LeafTemperate(0.95f, 1.0f, 0.85f);
+	const FLinearColor LeafConifer(0.5f, 0.66f, 0.55f);
+	const FLinearColor LeafJungle(0.8f, 1.05f, 0.7f);
+	const FLinearColor LeafDry(1.25f, 1.05f, 0.6f);
+	const FLinearColor LeafGold(1.7f, 1.25f, 0.35f);
+	const FLinearColor LeafRust(1.8f, 0.75f, 0.3f);
+	const FLinearColor LeafFrost(1.5f, 1.6f, 1.6f);
 }
 
 ATerrainStreamer::ATerrainStreamer()
@@ -61,17 +80,21 @@ ATerrainStreamer::ATerrainStreamer()
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TerrainMat(TEXT("/Game/Explorer/Materials/M_Terrain.M_Terrain"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PropMat(TEXT("/Game/Explorer/Materials/M_InstanceColor.M_InstanceColor"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> PropMat(TEXT("/Game/Explorer/Materials/M_Prop.M_Prop"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> RockMat(TEXT("/Game/Explorer/Materials/M_RockMesh.M_RockMesh"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FoliageMat(TEXT("/Game/Explorer/Materials/M_Foliage.M_Foliage"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WaterMat(TEXT("/Game/Explorer/Materials/M_Water.M_Water"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeMesh(TEXT("/Engine/BasicShapes/Cone.Cone"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> RockMesh(TEXT("/Game/StarterContent/Props/SM_Rock.SM_Rock"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> BushMesh(TEXT("/Game/StarterContent/Props/SM_Bush.SM_Bush"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMesh(TEXT("/Engine/BasicShapes/Plane.Plane"));
 
 	TerrainMaterial = TerrainMat.Object;
-	PropMaterial = PropMat.Object;
-	PartMeshes = { CylinderMesh.Object, ConeMesh.Object, SphereMesh.Object, CubeMesh.Object };
+	PartMeshes = { CylinderMesh.Object, ConeMesh.Object, SphereMesh.Object, CubeMesh.Object, RockMesh.Object, BushMesh.Object, CylinderMesh.Object };
+	PartMaterials = { PropMat.Object, PropMat.Object, PropMat.Object, PropMat.Object, RockMat.Object, FoliageMat.Object, PropMat.Object };
 
 	Ocean = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Ocean"));
 	Ocean->SetupAttachment(RootComponent);
@@ -210,18 +233,20 @@ void ATerrainStreamer::BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32
 
 	TArray<FVector> Vertices;
 	TArray<FVector> Normals;
-	TArray<FVector2D> UVs;
-	TArray<FColor> Colors;
+	TArray<FVector2D> UV0;
+	TArray<FVector2D> UV1;
+	TArray<FColor> LayerWeights;
 	TArray<int32> Triangles;
 	const int32 NumSkirt = 4 * N;
-	Vertices.Reserve(Side * Side + NumSkirt);
-	Normals.Reserve(Side * Side + NumSkirt);
-	UVs.Reserve(Side * Side + NumSkirt);
-	Colors.Reserve(Side * Side + NumSkirt);
+	const int32 NumVerts = Side * Side + NumSkirt;
+	Vertices.Reserve(NumVerts);
+	Normals.Reserve(NumVerts);
+	UV0.Reserve(NumVerts);
+	UV1.Reserve(NumVerts);
+	LayerWeights.Reserve(NumVerts);
 	Triangles.Reserve(N * N * 6 + NumSkirt * 12);
 
-	const FLinearColor Rock = WorldGen::RockColor();
-	const FLinearColor Snow = WorldGen::SnowColor();
+	auto ToByte = [](float V) { return static_cast<uint8>(FMath::Clamp(V, 0.0f, 1.0f) * 255.0f); };
 	for (int32 Y = 0; Y < Side; ++Y)
 	{
 		for (int32 X = 0; X < Side; ++X)
@@ -235,17 +260,13 @@ void ATerrainStreamer::BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32
 			const FVector Normal = FVector(-DX, -DY, 2.0f * Spacing).GetSafeNormal();
 			Normals.Add(Normal);
 
-			// Bare rock on steep ground above the shoreline; snow still clings to gentler slopes in the cold.
-			FLinearColor Color = S.Color;
-			const float Steep = Smooth(0.82f, 0.62f, Normal.Z) * Smooth(200.0f, 800.0f, S.Height);
-			Color = FMath::Lerp(Color, Rock, Steep);
-			const float SnowCover = Smooth(0.16f, 0.06f, S.Temperature) * Smooth(0.5f, 0.7f, Normal.Z);
-			Color = FMath::Lerp(Color, Snow, SnowCover);
-			FColor Packed = Color.ToFColor(false);
-			Packed.A = static_cast<uint8>(FMath::Clamp(S.Wetness, 0.0f, 1.0f) * 255.0f);
-			Colors.Add(Packed);
-
-			UVs.Add(FVector2D(X, Y));
+			// Material layer weights (see M_Terrain): R sand, G rock, B snow, A forest floor.
+			const float Snow = S.Snow * Smooth(0.5f, 0.72f, Normal.Z);
+			const float Steep = Smooth(0.82f, 0.6f, Normal.Z) * Smooth(200.0f, 800.0f, S.Height);
+			const float Rock = FMath::Max(Steep, S.Rock) * (1.0f - Snow * 0.8f);
+			LayerWeights.Add(FColor(ToByte(S.Sand * (1.0f - Rock)), ToByte(Rock), ToByte(Snow), ToByte(S.Forest)));
+			UV1.Add(FVector2D(S.Dryness, S.Wetness));
+			UV0.Add(FVector2D(X, Y));
 		}
 	}
 
@@ -279,12 +300,14 @@ void ATerrainStreamer::BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32
 		const int32 Top = Perimeter[i];
 		const FVector Vertex = Vertices[Top] - FVector(0, 0, SkirtDepth);
 		const FVector Normal = Normals[Top];
-		const FColor Color = Colors[Top];
-		const FVector2D UV = UVs[Top];
+		const FColor Layer = LayerWeights[Top];
+		const FVector2D A = UV0[Top];
+		const FVector2D B = UV1[Top];
 		Vertices.Add(Vertex);
 		Normals.Add(Normal);
-		Colors.Add(Color);
-		UVs.Add(UV);
+		LayerWeights.Add(Layer);
+		UV0.Add(A);
+		UV1.Add(B);
 	}
 	for (int32 i = 0; i < NumSkirt; ++i)
 	{
@@ -301,35 +324,38 @@ void ATerrainStreamer::BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32
 		Chunk.Mesh = AcquireMesh();
 	}
 	Chunk.Mesh->SetWorldLocation(Origin);
-	Chunk.Mesh->CreateMeshSection(0, Vertices, Triangles, Normals, UVs, Colors, TArray<FProcMeshTangent>(), bWithCollision);
+	const TArray<FVector2D> Empty;
+	Chunk.Mesh->CreateMeshSection(0, Vertices, Triangles, Normals, UV0, UV1, Empty, Empty, LayerWeights, TArray<FProcMeshTangent>(), bWithCollision);
 	Chunk.Mesh->SetMaterial(0, TerrainMaterial);
 	Chunk.Step = Step;
 	Chunk.bHasCollision = bWithCollision;
 }
 
-void ATerrainStreamer::FPropBatch::Add(EPropPart Part, const FVector& Center, const FRotator& Rotation, const FVector& SizeCm, const FLinearColor& Color, float Glow)
+void ATerrainStreamer::FPropBatch::Add(EPropPart Part, const FVector& Center, const FRotator& Rotation, const FVector& SizeCm, const FLinearColor& Color, float Glow, ESurface Surface)
 {
-	// Engine basic shapes are 100 units across and centred on their pivot.
-	Transforms[Part].Add(FTransform(Rotation, Center, SizeCm / 100.0));
-	CustomData[Part].Append({ Color.R, Color.G, Color.B, Glow });
+	Instances[Part].Add({ Center, Rotation, SizeCm });
+	CustomData[Part].Append({ Color.R, Color.G, Color.B, Glow, static_cast<float>(Surface) });
 }
 
 void ATerrainStreamer::BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps Level)
 {
 	FPropBatch Batch;
 	AddCities(Coord, Batch);
+	AddLighthouses(Coord, Batch);
+	AddVolcanoGlow(Coord, Batch);
 	AddFloatingIslands(Coord, Batch);
 	if (Level == EProps::Full)
 	{
 		AddVegetation(Coord, Batch);
 		AddVillages(Coord, Batch);
+		AddStoneCircles(Coord, Batch);
 	}
 
 	for (int32 Part = 0; Part < NumParts; ++Part)
 	{
 		UHierarchicalInstancedStaticMeshComponent*& Component = Chunk.Parts[Part];
-		const TArray<FTransform>& Transforms = Batch.Transforms[Part];
-		if (Transforms.Num() == 0)
+		const TArray<FPropBatch::FInstance>& Instances = Batch.Instances[Part];
+		if (Instances.Num() == 0)
 		{
 			if (Component)
 			{
@@ -341,6 +367,18 @@ void ATerrainStreamer::BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps 
 			continue;
 		}
 
+		// Fit each mesh to the requested size and centre it, whatever its native size and pivot.
+		const FBox Bounds = PartMeshes[Part]->GetBoundingBox();
+		const FVector MeshSize = Bounds.GetSize().ComponentMax(FVector(1.0));
+		TArray<FTransform> Transforms;
+		Transforms.Reserve(Instances.Num());
+		for (const FPropBatch::FInstance& Instance : Instances)
+		{
+			const FVector Scale = Instance.Size / MeshSize;
+			const FVector Location = Instance.Center - Instance.Rotation.RotateVector(Bounds.GetCenter() * Scale);
+			Transforms.Add(FTransform(Instance.Rotation, Location, Scale));
+		}
+
 		if (!Component)
 		{
 			Component = AcquirePart(static_cast<EPropPart>(Part));
@@ -350,7 +388,7 @@ void ATerrainStreamer::BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps 
 		const TArray<float>& Data = Batch.CustomData[Part];
 		for (int32 i = 0; i < Transforms.Num(); ++i)
 		{
-			Component->SetCustomData(i, TArrayView<const float>(&Data[i * 4], 4), false);
+			Component->SetCustomData(i, TArrayView<const float>(&Data[i * 5], 5), false);
 		}
 		Component->MarkRenderStateDirty();
 	}
@@ -384,8 +422,9 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) 
 	};
 	GatherClearings(VillageCell, VillageRadius + 3000.0, [](int32 X, int32 Y, FVector& P) { return FindVillage(X, Y, P); });
 	GatherClearings(CityCell, CityRadius + 3000.0, [](int32 X, int32 Y, FVector& P) { return FindCity(X, Y, P); });
+	GatherClearings(StoneCircleCell, StoneCircleRadius + 1500.0, [](int32 X, int32 Y, FVector& P) { return FindStoneCircle(X, Y, P); });
+	GatherClearings(LighthouseCell, 3000.0, [](int32 X, int32 Y, FVector& P) { return FindLighthouse(X, Y, P); });
 
-	const FLinearColor Trunk = Srgb(0x5A4030);
 	for (int32 CY = FirstY; CY < FirstY + CellsPerChunk; ++CY)
 	{
 		for (int32 CX = FirstX; CX < FirstX + CellsPerChunk; ++CX)
@@ -408,11 +447,25 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) 
 				continue;
 			}
 
-			const float BoulderChance = 0.012f + S.Mountains * 0.05f + (S.Biome == EBiome::Desert ? 0.01f : 0.0f);
+			const float ShrubChance = 0.03f + (S.Biome == EBiome::Grassland || S.Biome == EBiome::Savanna ? 0.05f : 0.0f) + (S.Biome == EBiome::Desert ? 0.02f : 0.0f);
+			const float BoulderChance = 0.012f + S.Mountains * 0.05f + S.Rock * 0.06f + (S.Biome == EBiome::Desert ? 0.015f : 0.0f);
 			const float Kind = WorldGen::HashFloat(CX, CY, SeedTreeKind);
-			const float Size = FMath::Lerp(0.7f, 1.4f, WorldGen::HashFloat(CX, CY, SeedTreeSize));
+			const float Size = FMath::Lerp(0.75f, 1.35f, WorldGen::HashFloat(CX, CY, SeedTreeSize));
 			const float Tint = WorldGen::HashFloat(CX, CY, SeedTreeTint);
+			const FRotator Spin(0.0f, Tint * 360.0f, 0.0f);
 			const FVector Ground(PX, PY, S.Height);
+
+			// Canopies are clusters of scanned foliage around the top of a trunk.
+			auto Crown = [&](const FVector& Top, float Width, float Height, const FLinearColor& Leaves, int32 Clusters)
+			{
+				Batch.Add(Bush, Top, Spin, FVector(Width, Width, Height), Jitter(Leaves, Tint));
+				for (int32 i = 1; i < Clusters; ++i)
+				{
+					const float A = (Tint + i / static_cast<float>(Clusters)) * 2.0f * PI;
+					const FVector Offset(FMath::Cos(A) * Width * 0.3f, FMath::Sin(A) * Width * 0.3f, -Height * 0.15f);
+					Batch.Add(Bush, Top + Offset, FRotator(0.0f, A * 57.0f, 0.0f), FVector(Width, Width, Height) * 0.7f, Jitter(Leaves, Kind));
+				}
+			};
 
 			if (Chance < S.TreeDensity)
 			{
@@ -428,73 +481,73 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) 
 				switch (S.Biome)
 				{
 				case EBiome::Desert:
-				{
-					// Saguaro: a column with one or two arms.
-					const float H = 400.0f * Size;
-					Batch.Add(Cylinder, Ground + FVector(0, 0, H * 0.5f), FRotator::ZeroRotator, FVector(90, 90, H), Jitter(Srgb(0x4F7A3A), Tint));
-					const int32 Arms = Kind < 0.5f ? 1 : 2;
-					for (int32 Arm = 0; Arm < Arms; ++Arm)
-					{
-						const float Side = Arm == 0 ? 1.0f : -1.0f;
-						const float ArmH = H * FMath::Lerp(0.3f, 0.45f, Tint);
-						Batch.Add(Cylinder, Ground + FVector(Side * 110.0f, 0, H * 0.45f + ArmH * 0.5f), FRotator::ZeroRotator, FVector(70, 70, ArmH), Jitter(Srgb(0x4F7A3A), Kind));
-					}
-					break;
-				}
 				case EBiome::Savanna:
 				{
-					// Acacia: short trunk, flat wide crown.
-					const float H = 550.0f * Size;
-					Batch.Add(Cylinder, Ground + FVector(0, 0, H * 0.5f), FRotator::ZeroRotator, FVector(60, 60, H), Trunk);
-					Batch.Add(Sphere, Ground + FVector(0, 0, H + 80.0f), FRotator::ZeroRotator, FVector(1000, 1000, 220) * Size, Jitter(Srgb(0x6E7A34), Tint));
+					// Acacia: short trunk, flat spreading crown.
+					const float H = 500.0f * Size;
+					Batch.Add(Trunk, Ground + FVector(0, 0, H * 0.5f), Spin, FVector(50, 50, H), Bark, 0.0f, SurfConcrete);
+					Crown(Ground + FVector(0, 0, H + 100.0f), 950.0f * Size, 260.0f * Size, LeafDry, 3);
 					break;
 				}
 				case EBiome::Jungle:
 				{
-					// Tall canopy trees with layered crowns.
+					// Tall emergent trees with broad, layered canopies.
 					const float H = 1800.0f * Size;
-					Batch.Add(Cylinder, Ground + FVector(0, 0, H * 0.5f), FRotator::ZeroRotator, FVector(110, 110, H), Trunk);
-					Batch.Add(Sphere, Ground + FVector(0, 0, H), FRotator::ZeroRotator, FVector(1300, 1300, 500) * Size, Jitter(Srgb(0x245C1E), Tint));
-					Batch.Add(Sphere, Ground + FVector(0, 0, H * 0.65f), FRotator::ZeroRotator, FVector(800, 800, 350) * Size, Jitter(Srgb(0x2E6B26), Kind));
+					Batch.Add(Trunk, Ground + FVector(0, 0, H * 0.5f), Spin, FVector(100, 100, H), Bark, 0.0f, SurfConcrete);
+					Crown(Ground + FVector(0, 0, H), 1200.0f * Size, 600.0f * Size, LeafJungle, 4);
+					Crown(Ground + FVector(0, 0, 250.0f), 500.0f * Size, 400.0f * Size, LeafJungle, 1);
 					break;
 				}
 				case EBiome::Taiga:
 				case EBiome::Tundra:
 				case EBiome::Snow:
 				{
-					// Conifer; frosted in the deep cold.
-					const float H = 1200.0f * Size;
-					Batch.Add(Cylinder, Ground + FVector(0, 0, 150.0f), FRotator::ZeroRotator, FVector(70, 70, 300), Trunk);
-					const FLinearColor Needles = FMath::Lerp(Srgb(0x2C4A2E), Srgb(0xDDE6E6), Smooth(0.22f, 0.08f, S.Temperature));
-					Batch.Add(Cone, Ground + FVector(0, 0, 200.0f + H * 0.5f), FRotator::ZeroRotator, FVector(H * 0.4f, H * 0.4f, H), Jitter(Needles, Tint));
+					// Conifer: foliage stacked narrower towards the top; frosted in the deep cold.
+					const FLinearColor Needles = FMath::Lerp(LeafConifer, LeafFrost, Smooth(0.22f, 0.08f, S.Temperature));
+					const float H = 1300.0f * Size;
+					Batch.Add(Trunk, Ground + FVector(0, 0, H * 0.45f), Spin, FVector(45, 45, H * 0.9f), Bark, 0.0f, SurfConcrete);
+					for (int32 Tier = 0; Tier < 4; ++Tier)
+					{
+						const float T = Tier / 3.0f;
+						const float W = FMath::Lerp(450.0f, 150.0f, T) * Size;
+						Batch.Add(Bush, Ground + FVector(0, 0, FMath::Lerp(0.3f, 0.92f, T) * H), FRotator(0, Tier * 80.0f + Tint * 360.0f, 0), FVector(W, W, H * 0.3f), Jitter(Needles, Tint));
+					}
 					break;
 				}
 				default:
 				{
-					// Broadleaf, with the odd conifer and a few trees already turning gold and red.
-					if (Kind < 0.2f)
+					// Broadleaf, a few already turning gold or rust, with the odd conifer mixed in.
+					if (Kind < 0.18f)
 					{
-						const float H = 1100.0f * Size;
-						Batch.Add(Cylinder, Ground + FVector(0, 0, 150.0f), FRotator::ZeroRotator, FVector(70, 70, 300), Trunk);
-						Batch.Add(Cone, Ground + FVector(0, 0, 200.0f + H * 0.5f), FRotator::ZeroRotator, FVector(H * 0.4f, H * 0.4f, H), Jitter(Srgb(0x2F5233), Tint));
+						const float H = 1200.0f * Size;
+						Batch.Add(Trunk, Ground + FVector(0, 0, H * 0.45f), Spin, FVector(45, 45, H * 0.9f), Bark, 0.0f, SurfConcrete);
+						for (int32 Tier = 0; Tier < 3; ++Tier)
+						{
+							const float W = FMath::Lerp(420.0f, 170.0f, Tier / 2.0f) * Size;
+							Batch.Add(Bush, Ground + FVector(0, 0, FMath::Lerp(0.35f, 0.9f, Tier / 2.0f) * H), FRotator(0, Tier * 110.0f, 0), FVector(W, W, H * 0.35f), Jitter(LeafConifer, Tint));
+						}
 						break;
 					}
-					const float H = 550.0f * Size;
-					const float Crown = 700.0f * Size;
-					FLinearColor Leaves = Srgb(0x3E6B2A);
-					if (Kind > 0.9f) Leaves = Srgb(0xC9A23A);
-					else if (Kind > 0.82f) Leaves = Srgb(0xB5652A);
-					Batch.Add(Cylinder, Ground + FVector(0, 0, H * 0.5f), FRotator::ZeroRotator, FVector(80, 80, H), Trunk);
-					Batch.Add(Sphere, Ground + FVector(0, 0, H + Crown * 0.3f), FRotator::ZeroRotator, FVector(Crown, Crown, Crown * 1.15f), Jitter(Leaves, Tint));
+					FLinearColor Leaves = LeafTemperate;
+					if (Kind > 0.93f) Leaves = LeafGold;
+					else if (Kind > 0.88f) Leaves = LeafRust;
+					const float H = 450.0f * Size;
+					Batch.Add(Trunk, Ground + FVector(0, 0, H * 0.5f), Spin, FVector(60, 60, H), Bark, 0.0f, SurfConcrete);
+					Crown(Ground + FVector(0, 0, H + 250.0f * Size), 750.0f * Size, 650.0f * Size, Leaves, 3);
 					break;
 				}
 				}
 			}
-			else if (Chance < S.TreeDensity + BoulderChance)
+			else if (Chance < S.TreeDensity + ShrubChance)
 			{
-				const float B = FMath::Lerp(200.0f, 700.0f, Kind) * Size;
-				const FRotator Spin(0, Tint * 360.0f, 0);
-				Batch.Add(Sphere, Ground + FVector(0, 0, B * 0.15f), Spin, FVector(B, B * 0.8f, B * 0.6f), Jitter(Srgb(0x8A847C), Tint, 0.2f));
+				const FLinearColor Leaves = FMath::Lerp(LeafTemperate, LeafDry, S.Dryness);
+				Batch.Add(Bush, Ground + FVector(0, 0, 60.0f * Size), Spin, FVector(220, 220, 160) * Size, Jitter(Leaves, Tint));
+			}
+			else if (Chance < S.TreeDensity + ShrubChance + BoulderChance)
+			{
+				const float B = FMath::Lerp(150.0f, 900.0f, Kind * Kind) * Size;
+				const FLinearColor Stone = FMath::Lerp(White, FLinearColor(1.35f, 1.1f, 0.8f), S.Dryness);
+				Batch.Add(Rock, Ground + FVector(0, 0, B * 0.2f), FRotator(Tint * 20.0f, Tint * 360.0f, Kind * 15.0f), FVector(B, B * 0.85f, B * 0.6f), Jitter(Stone, Tint, 0.1f));
 			}
 		}
 	}
@@ -503,6 +556,8 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) 
 double ATerrainStreamer::VillageCellSize() { return VillageCell; }
 double ATerrainStreamer::CityCellSize() { return CityCell; }
 double ATerrainStreamer::IslandCellSize() { return IslandCell; }
+double ATerrainStreamer::LighthouseCellSize() { return LighthouseCell; }
+double ATerrainStreamer::StoneCircleCellSize() { return StoneCircleCell; }
 
 bool ATerrainStreamer::FindVillage(int32 CX, int32 CY, FVector& OutCenter)
 {
@@ -514,7 +569,7 @@ bool ATerrainStreamer::FindVillage(int32 CX, int32 CY, FVector& OutCenter)
 	OutCenter = FVector((CX + Rand.Range(0.2f, 0.8f)) * VillageCell, (CY + Rand.Range(0.2f, 0.8f)) * VillageCell, 0.0);
 	const FWorldSample S = WorldGen::Sample(OutCenter.X, OutCenter.Y);
 	OutCenter.Z = S.Height;
-	return S.Height >= 300.0f && S.Height <= 30000.0f && S.Mountains <= 0.3f && S.Biome != EBiome::Beach && S.Biome != EBiome::Snow;
+	return S.Height >= 300.0f && S.Height <= 30000.0f && S.Mountains <= 0.3f && S.Volcano <= 0.0f && S.Biome != EBiome::Beach && S.Biome != EBiome::Snow;
 }
 
 bool ATerrainStreamer::FindCity(int32 CX, int32 CY, FVector& OutCenter)
@@ -527,13 +582,13 @@ bool ATerrainStreamer::FindCity(int32 CX, int32 CY, FVector& OutCenter)
 	OutCenter = FVector((CX + Rand.Range(0.25f, 0.75f)) * CityCell, (CY + Rand.Range(0.25f, 0.75f)) * CityCell, 0.0);
 	const FWorldSample S = WorldGen::Sample(OutCenter.X, OutCenter.Y);
 	OutCenter.Z = S.Height;
-	return S.Height >= 300.0f && S.Height <= 15000.0f && S.Mountains <= 0.15f && S.Biome != EBiome::Snow && S.Biome != EBiome::Jungle;
+	return S.Height >= 300.0f && S.Height <= 15000.0f && S.Mountains <= 0.15f && S.Volcano <= 0.0f && S.Biome != EBiome::Snow && S.Biome != EBiome::Jungle;
 }
 
 bool ATerrainStreamer::FindFloatingIsland(int32 CX, int32 CY, FVector& OutTop, float& OutRadius)
 {
 	FRandom Rand{ CX, CY, SeedIsland };
-	if (Rand.Next() > 0.35f)
+	if (Rand.Next() > 0.2f)
 	{
 		return false;
 	}
@@ -541,6 +596,45 @@ bool ATerrainStreamer::FindFloatingIsland(int32 CX, int32 CY, FVector& OutTop, f
 	OutTop.Z = FMath::Max(WorldGen::Height(OutTop.X, OutTop.Y), 0.0f) + Rand.Range(40000.0f, 100000.0f);
 	OutRadius = Rand.Range(6000.0f, 24000.0f);
 	return true;
+}
+
+bool ATerrainStreamer::FindLighthouse(int32 CX, int32 CY, FVector& OutBase)
+{
+	FRandom Rand{ CX, CY, SeedLighthouse };
+	if (Rand.Next() > 0.6f)
+	{
+		return false;
+	}
+	OutBase = FVector((CX + Rand.Range(0.1f, 0.9f)) * LighthouseCell, (CY + Rand.Range(0.1f, 0.9f)) * LighthouseCell, 0.0);
+	OutBase.Z = WorldGen::Height(OutBase.X, OutBase.Y);
+	if (OutBase.Z < 300.0f || OutBase.Z > 3000.0f)
+	{
+		return false;
+	}
+	// Needs open sea close by.
+	for (int32 i = 0; i < 8; ++i)
+	{
+		const float A = i * PI / 4.0f;
+		if (WorldGen::Height(OutBase.X + FMath::Cos(A) * 20000.0, OutBase.Y + FMath::Sin(A) * 20000.0) < -300.0f)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+bool ATerrainStreamer::FindStoneCircle(int32 CX, int32 CY, FVector& OutCenter)
+{
+	FRandom Rand{ CX, CY, SeedStones };
+	if (Rand.Next() > 0.25f)
+	{
+		return false;
+	}
+	OutCenter = FVector((CX + Rand.Range(0.2f, 0.8f)) * StoneCircleCell, (CY + Rand.Range(0.2f, 0.8f)) * StoneCircleCell, 0.0);
+	const FWorldSample S = WorldGen::Sample(OutCenter.X, OutCenter.Y);
+	OutCenter.Z = S.Height;
+	return S.Height >= 500.0f && S.Mountains <= 0.3f && S.Volcano <= 0.0f &&
+		(S.Biome == EBiome::Grassland || S.Biome == EBiome::Tundra || S.Biome == EBiome::Savanna);
 }
 
 void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) const
@@ -563,12 +657,11 @@ void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) co
 			const FWorldSample S = WorldGen::Sample(Center.X, Center.Y);
 			FRandom Rand{ CX, CY, SeedVillage + 2 };
 
-			// Building style follows the climate.
+			// Building style follows the climate: adobe in the heat, timber in the cold, brick and plaster elsewhere.
 			const bool bAdobe = S.Biome == EBiome::Desert || S.Biome == EBiome::Savanna;
 			const bool bTimber = S.Biome == EBiome::Taiga || S.Biome == EBiome::Tundra;
-			const FLinearColor Walls[] = { Srgb(0xEDE3CF), Srgb(0xF4F1EA), Srgb(0xD9C3A0), Srgb(0xE8C9A8) };
-			const FLinearColor Roofs[] = { Srgb(0x9A3F2C), Srgb(0x5B4A44), Srgb(0x7A4B2A), Srgb(0x44505A) };
-			const FLinearColor Lamp = Srgb(0xFFC37A);
+			const FLinearColor Plaster[] = { FLinearColor(1.6f, 1.5f, 1.3f), FLinearColor(1.7f, 1.65f, 1.55f), FLinearColor(1.5f, 1.3f, 1.0f) };
+			const FLinearColor Roofs[] = { FLinearColor(1.2f, 0.55f, 0.4f), FLinearColor(0.7f, 0.7f, 0.75f), FLinearColor(0.9f, 0.6f, 0.45f) };
 
 			const int32 Houses = 6 + FMath::FloorToInt(Rand.Next() * 14.0f);
 			for (int32 i = 0; i < Houses; ++i)
@@ -590,38 +683,89 @@ void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) co
 
 				if (i == 0)
 				{
-					// A tower or temple at the heart of the village.
-					const FLinearColor Stone = bAdobe ? Srgb(0xD8B98A) : Srgb(0xCFC8BA);
-					Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + 650.0f), FRotator(0, Yaw, 0), FVector(550, 550, 1500), Stone);
+					// A stone church or temple at the heart of the village.
+					const FLinearColor Stone = bAdobe ? FLinearColor(1.5f, 1.25f, 0.95f) : FLinearColor(1.3f, 1.28f, 1.22f);
+					Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + 650.0f), FRotator(0, Yaw, 0), FVector(900, 1500, 1500), Stone, 0.0f, bAdobe ? SurfConcrete : SurfRock);
 					if (bAdobe)
 					{
-						Batch.Add(Sphere, FVector(Pos.X, Pos.Y, Ground + 1400.0f), FRotator::ZeroRotator, FVector(520, 520, 520), Srgb(0xF0E6D2));
+						Batch.Add(Sphere, FVector(Pos.X, Pos.Y, Ground + 1400.0f), FRotator::ZeroRotator, FVector(850, 850, 850), FLinearColor(1.7f, 1.6f, 1.45f), 0.0f, SurfConcrete);
 					}
 					else
 					{
-						Batch.Add(Cone, FVector(Pos.X, Pos.Y, Ground + 1400.0f + 450.0f), FRotator(0, Yaw, 0), FVector(600, 600, 900), Roofs[1]);
+						Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + 1400.0f), FRotator(0, Yaw, 45), FVector(1500, 900 / UE_SQRT_2 + 40, 900 / UE_SQRT_2 + 40), Roofs[1], 0.0f, SurfSlate);
+						const FVector Tower = FRotator(0, Yaw, 0).RotateVector(FVector(0, 800, 0));
+						Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + 1200.0f) + Tower, FRotator(0, Yaw, 0), FVector(450, 450, 2500), Stone, 0.0f, SurfRock);
+						Batch.Add(Cone, FVector(Pos.X, Pos.Y, Ground + 2450.0f + 500.0f) + Tower, FRotator(0, Yaw, 0), FVector(520, 520, 1000), Roofs[1], 0.0f, SurfSlate);
 					}
-					Batch.Add(Sphere, FVector(Pos.X, Pos.Y, Ground + 1250.0f), FRotator::ZeroRotator, FVector(90, 90, 90), Lamp, 12.0f);
 					continue;
 				}
 
-				const float W = House.Range(600.0f, 1000.0f);
-				const float D = House.Range(500.0f, 800.0f);
-				const float H = House.Range(400.0f, 600.0f);
-				const FLinearColor Wall = bTimber ? Srgb(0x6B4A33) : bAdobe ? Srgb(0xD4B083) : Walls[FMath::FloorToInt(House.Next() * 4) % 4];
-				Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H * 0.5f - 50.0f), FRotator(0, Yaw, 0), FVector(W, D, H), Jitter(Wall, House.Next(), 0.06f));
+				const float W = House.Range(700.0f, 1100.0f);
+				const float D = House.Range(550.0f, 850.0f);
+				const float H = House.Range(450.0f, 650.0f);
+				FLinearColor Wall = Plaster[FMath::FloorToInt(House.Next() * 3) % 3];
+				ESurface WallSurface = House.Next() < 0.4f ? SurfBrick : SurfConcrete;
+				if (bTimber) { Wall = FLinearColor(0.5f, 0.36f, 0.25f); WallSurface = SurfConcrete; }
+				if (bAdobe) { Wall = FLinearColor(1.5f, 1.2f, 0.85f); WallSurface = SurfConcrete; }
+				if (WallSurface == SurfBrick) { Wall = White; }
+				Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H * 0.5f - 50.0f), FRotator(0, Yaw, 0), FVector(W, D, H), Jitter(Wall, House.Next(), 0.06f), 0.0f, WallSurface);
 
 				if (!bAdobe)
 				{
-					// Pitched roof: a cube turned 45 degrees about the ridge, its diagonal spanning the house.
+					// Pitched roof: a box turned 45 degrees about the ridge, its diagonal spanning the house.
 					const float S2 = D / UE_SQRT_2 + 40.0f;
-					const FLinearColor Roof = bTimber ? Srgb(0x3F3A36) : Roofs[FMath::FloorToInt(House.Next() * 4) % 4];
-					Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H - 50.0f), FRotator(0, Yaw, 45), FVector(W + 60.0f, S2, S2), Roof);
+					const FLinearColor Roof = bTimber ? FLinearColor(0.55f, 0.55f, 0.58f) : Roofs[FMath::FloorToInt(House.Next() * 3) % 3];
+					Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H - 50.0f), FRotator(0, Yaw, 45), FVector(W + 60.0f, S2, S2), Roof, 0.0f, SurfSlate);
 				}
+			}
+		}
+	}
+}
 
-				// A warm lantern by the door.
-				const FVector Door = FRotator(0, Yaw, 0).RotateVector(FVector(0, D * 0.5f + 60.0f, 0));
-				Batch.Add(Sphere, FVector(Pos.X, Pos.Y, Ground + 230.0f) + Door, FRotator::ZeroRotator, FVector(45, 45, 45), Lamp, 10.0f);
+void ATerrainStreamer::AddStoneCircles(const FIntPoint& Coord, FPropBatch& Batch) const
+{
+	const FVector ChunkMin(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize(), 0.0);
+	const int32 MinCX = FMath::FloorToInt((ChunkMin.X - StoneCircleRadius) / StoneCircleCell);
+	const int32 MaxCX = FMath::FloorToInt((ChunkMin.X + ChunkWorldSize() + StoneCircleRadius) / StoneCircleCell);
+	const int32 MinCY = FMath::FloorToInt((ChunkMin.Y - StoneCircleRadius) / StoneCircleCell);
+	const int32 MaxCY = FMath::FloorToInt((ChunkMin.Y + ChunkWorldSize() + StoneCircleRadius) / StoneCircleCell);
+
+	for (int32 CY = MinCY; CY <= MaxCY; ++CY)
+	{
+		for (int32 CX = MinCX; CX <= MaxCX; ++CX)
+		{
+			FVector Center;
+			if (!FindStoneCircle(CX, CY, Center))
+			{
+				continue;
+			}
+			FRandom Rand{ CX, CY, SeedStones + 1 };
+			const int32 Stones = 12 + FMath::FloorToInt(Rand.Next() * 8);
+			const float Ring = Rand.Range(1200.0f, 1800.0f);
+			const FLinearColor Stone(1.15f, 1.12f, 1.05f);
+			for (int32 i = 0; i < Stones; ++i)
+			{
+				const float A = 2.0f * PI * i / Stones;
+				const FVector Pos = Center + FVector(FMath::Cos(A) * Ring, FMath::Sin(A) * Ring, 0.0);
+				if (!ChunkContains(Coord, Pos) || Rand.Next() < 0.12f)
+				{
+					continue; // a few have fallen or been taken
+				}
+				const float Ground = WorldGen::Height(Pos.X, Pos.Y);
+				const float H = Rand.Range(350.0f, 550.0f);
+				const FRotator Lean(Rand.Range(-6.0f, 6.0f), A * 57.2958f + 90.0f, Rand.Range(-6.0f, 6.0f));
+				Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H * 0.45f), Lean, FVector(220, 110, H), Jitter(Stone, Rand.Next(), 0.1f), 0.0f, SurfRock);
+				if (i % 2 == 0 && Rand.Next() < 0.6f)
+				{
+					// Lintel bridging to the next stone.
+					const float A2 = A + PI / Stones;
+					const FVector Mid = Center + FVector(FMath::Cos(A2) * Ring, FMath::Sin(A2) * Ring, 0.0);
+					Batch.Add(Cube, FVector(Mid.X, Mid.Y, Ground + H * 0.9f + 50.0f), FRotator(0, A2 * 57.2958f + 90.0f, 0), FVector(2.0f * PI * Ring / Stones + 150.0f, 110, 90), Stone, 0.0f, SurfRock);
+				}
+			}
+			if (ChunkContains(Coord, Center))
+			{
+				Batch.Add(Cube, FVector(Center.X, Center.Y, Center.Z + 50.0f), FRotator(0, Rand.Range(0.0f, 180.0f), 0), FVector(380, 160, 90), Stone, 0.0f, SurfRock);
 			}
 		}
 	}
@@ -645,7 +789,6 @@ void ATerrainStreamer::AddCities(const FIntPoint& Coord, FPropBatch& Batch) cons
 				continue;
 			}
 
-			const FLinearColor Facades[] = { Srgb(0xB8B4AC), Srgb(0x6F8796), Srgb(0xC9B38F), Srgb(0xE6E6E0), Srgb(0x8C96A0) };
 			constexpr int32 Blocks = 7;
 			constexpr float Spacing = 6000.0f;
 			for (int32 GY = -Blocks; GY <= Blocks; ++GY)
@@ -670,15 +813,67 @@ void ATerrainStreamer::AddCities(const FIntPoint& Coord, FPropBatch& Batch) cons
 					}
 					const float H = FMath::Lerp(2500.0f, 20000.0f, Falloff * Falloff * Tower.Next());
 					const float W = Tower.Range(1800.0f, 3400.0f);
-					const int32 Style = FMath::FloorToInt(Tower.Next() * 5) % 5;
-					const float Glint = Style == 1 || Style == 4 ? 0.06f : 0.0f;
-					Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H * 0.5f - 200.0f), FRotator(0, Tower.Range(-4.0f, 4.0f), 0), FVector(W, W * Tower.Range(0.7f, 1.0f), H), Facades[Style], Glint);
+					const bool bGlass = Tower.Next() < 0.45f;
+					const FLinearColor Facade = bGlass ? FLinearColor(0.8f, 0.9f, 1.0f) : Jitter(FLinearColor(1.25f, 1.2f, 1.12f), Tower.Next(), 0.15f);
+					const FRotator Rot(0, Tower.Range(-4.0f, 4.0f), 0);
+					Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H * 0.5f - 200.0f), Rot, FVector(W, W * Tower.Range(0.7f, 1.0f), H), Facade, 0.0f, bGlass ? SurfGlass : SurfConcrete);
+					// Rooftop plant room.
+					Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + H - 200.0f + 250.0f), Rot, FVector(W * 0.5f, W * 0.4f, 500.0f), FLinearColor(1.1f, 1.1f, 1.1f), 0.0f, SurfConcrete);
 					if (H > 12000.0f)
 					{
-						Batch.Add(Sphere, FVector(Pos.X, Pos.Y, Ground + H), FRotator::ZeroRotator, FVector(150, 150, 150), Srgb(0xFF4A3A), 30.0f);
+						Batch.Add(Sphere, FVector(Pos.X, Pos.Y, Ground + H + 350.0f), FRotator::ZeroRotator, FVector(120, 120, 120), FLinearColor(1.0f, 0.1f, 0.05f), 40.0f, SurfGlass);
 					}
 				}
 			}
+		}
+	}
+}
+
+void ATerrainStreamer::AddLighthouses(const FIntPoint& Coord, FPropBatch& Batch) const
+{
+	const FVector ChunkMin(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize(), 0.0);
+	for (int32 CY = FMath::FloorToInt(ChunkMin.Y / LighthouseCell); CY <= FMath::FloorToInt((ChunkMin.Y + ChunkWorldSize()) / LighthouseCell); ++CY)
+	{
+		for (int32 CX = FMath::FloorToInt(ChunkMin.X / LighthouseCell); CX <= FMath::FloorToInt((ChunkMin.X + ChunkWorldSize()) / LighthouseCell); ++CX)
+		{
+			FVector Base;
+			if (!FindLighthouse(CX, CY, Base) || !ChunkContains(Coord, Base))
+			{
+				continue;
+			}
+			// White tower with red bands, glazed lantern room and a keeper's cottage.
+			const FLinearColor Paint(1.8f, 1.8f, 1.75f);
+			const FLinearColor Red(1.3f, 0.25f, 0.2f);
+			const float H = 2600.0f;
+			Batch.Add(Cylinder, Base + FVector(0, 0, H * 0.5f), FRotator::ZeroRotator, FVector(500, 500, H), Paint, 0.0f, SurfConcrete);
+			Batch.Add(Cylinder, Base + FVector(0, 0, H * 0.35f), FRotator::ZeroRotator, FVector(510, 510, 400), Red, 0.0f, SurfConcrete);
+			Batch.Add(Cylinder, Base + FVector(0, 0, H * 0.7f), FRotator::ZeroRotator, FVector(510, 510, 400), Red, 0.0f, SurfConcrete);
+			Batch.Add(Cylinder, Base + FVector(0, 0, H + 20.0f), FRotator::ZeroRotator, FVector(620, 620, 60), Paint, 0.0f, SurfConcrete);
+			Batch.Add(Cylinder, Base + FVector(0, 0, H + 220.0f), FRotator::ZeroRotator, FVector(360, 360, 360), White, 0.0f, SurfGlass);
+			Batch.Add(Sphere, Base + FVector(0, 0, H + 220.0f), FRotator::ZeroRotator, FVector(160, 160, 160), FLinearColor(1.0f, 0.85f, 0.5f), 25.0f, SurfGlass);
+			Batch.Add(Cone, Base + FVector(0, 0, H + 550.0f), FRotator::ZeroRotator, FVector(440, 440, 300), Red, 0.0f, SurfSlate);
+			Batch.Add(Cube, Base + FVector(900, 0, 250.0f), FRotator::ZeroRotator, FVector(900, 600, 500), Paint, 0.0f, SurfConcrete);
+		}
+	}
+}
+
+void ATerrainStreamer::AddVolcanoGlow(const FIntPoint& Coord, FPropBatch& Batch) const
+{
+	const FVector ChunkMin(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize(), 0.0);
+	const double Cell = WorldGen::VolcanoCellSize();
+	for (int32 CY = FMath::FloorToInt(ChunkMin.Y / Cell); CY <= FMath::FloorToInt((ChunkMin.Y + ChunkWorldSize()) / Cell); ++CY)
+	{
+		for (int32 CX = FMath::FloorToInt(ChunkMin.X / Cell); CX <= FMath::FloorToInt((ChunkMin.X + ChunkWorldSize()) / Cell); ++CX)
+		{
+			FVector2D Center;
+			float Radius, Peak;
+			if (!WorldGen::FindVolcano(CX, CY, Center, Radius, Peak) || !ChunkContains(Coord, FVector(Center, 0.0)))
+			{
+				continue;
+			}
+			// Molten rock glowing in the crater.
+			const float Floor = WorldGen::Height(Center.X, Center.Y);
+			Batch.Add(Sphere, FVector(Center, Floor + 800.0f), FRotator::ZeroRotator, FVector(Radius * 0.12f, Radius * 0.12f, 2500.0f), FLinearColor(1.0f, 0.3f, 0.05f), 12.0f, SurfRock);
 		}
 	}
 }
@@ -703,31 +898,20 @@ void ATerrainStreamer::AddFloatingIslands(const FIntPoint& Coord, FPropBatch& Ba
 			}
 			FRandom Rand{ CX, CY, SeedIsland + 1 };
 
-			// Rocky underside tapering to a point, a soft green cap, and a few trees.
+			// Rocky underside tapering to a point, a grassy cap, and a small wood on top.
 			const float Depth = R * Rand.Range(1.2f, 2.0f);
-			Batch.Add(Cone, Top - FVector(0, 0, Depth * 0.5f), FRotator(180, Rand.Range(0.0f, 360.0f), 0), FVector(R * 2.0f, R * 2.0f, Depth), Srgb(0x7A6A5A));
-			Batch.Add(Sphere, Top, FRotator::ZeroRotator, FVector(R * 2.1f, R * 2.1f, R * 0.35f), Srgb(0x6E9A48));
+			Batch.Add(Cone, Top - FVector(0, 0, Depth * 0.5f), FRotator(180, Rand.Range(0.0f, 360.0f), 0), FVector(R * 2.0f, R * 2.0f, Depth), White, 0.0f, SurfRock);
+			Batch.Add(Sphere, Top, FRotator::ZeroRotator, FVector(R * 2.1f, R * 2.1f, R * 0.35f), White, 0.0f, SurfGrass);
 
-			const int32 Trees = 4 + FMath::FloorToInt(Rand.Next() * 10);
+			const int32 Trees = 8 + FMath::FloorToInt(Rand.Next() * 16);
 			for (int32 i = 0; i < Trees; ++i)
 			{
 				const float A = Rand.Range(0.0f, 2.0f * PI);
-				const float D = R * 0.65f * FMath::Sqrt(Rand.Next());
-				const FVector Base = Top + FVector(FMath::Cos(A) * D, FMath::Sin(A) * D, R * 0.12f);
-				const float Size = Rand.Range(0.8f, 1.6f);
-				Batch.Add(Cylinder, Base + FVector(0, 0, 275.0f * Size), FRotator::ZeroRotator, FVector(80, 80, 550) * Size, Srgb(0x5A4030));
-				Batch.Add(Sphere, Base + FVector(0, 0, 760.0f * Size), FRotator::ZeroRotator, FVector(750, 750, 850) * Size, Jitter(Srgb(0x5E9A3A), Rand.Next()));
-			}
-
-			// Glowing motes drifting around it.
-			const int32 Motes = 3 + FMath::FloorToInt(Rand.Next() * 4);
-			for (int32 i = 0; i < Motes; ++i)
-			{
-				const float A = Rand.Range(0.0f, 2.0f * PI);
-				const float D = R * Rand.Range(1.2f, 1.8f);
-				const FVector Mote = Top + FVector(FMath::Cos(A) * D, FMath::Sin(A) * D, Rand.Range(-R, R * 0.6f));
-				const float Size = Rand.Range(150.0f, 400.0f);
-				Batch.Add(Sphere, Mote, FRotator::ZeroRotator, FVector(Size), Srgb(0xFFE7A8), 8.0f);
+				const float D = R * 0.7f * FMath::Sqrt(Rand.Next());
+				const FVector Base = Top + FVector(FMath::Cos(A) * D, FMath::Sin(A) * D, R * 0.15f * (1.0f - D / R));
+				const float Size = Rand.Range(0.8f, 1.5f);
+				Batch.Add(Trunk, Base + FVector(0, 0, 250.0f * Size), FRotator::ZeroRotator, FVector(60, 60, 500) * Size, Bark, 0.0f, SurfConcrete);
+				Batch.Add(Bush, Base + FVector(0, 0, 750.0f * Size), FRotator(0, A * 57.0f, 0), FVector(750, 750, 650) * Size, Jitter(LeafTemperate, Rand.Next()));
 			}
 		}
 	}
@@ -757,9 +941,13 @@ UHierarchicalInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPa
 		Component = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
 		Component->SetMobility(EComponentMobility::Movable);
 		Component->SetStaticMesh(PartMeshes[Part]);
-		Component->SetMaterial(0, PropMaterial);
+		Component->SetMaterial(0, PartMaterials[Part]);
 		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		Component->NumCustomDataFloats = 4;
+		Component->NumCustomDataFloats = 5;
+		if (Part == Rock || Part == Bush || Part == Trunk)
+		{
+			Component->SetCullDistances(DetailCullDistance * 0.8f, DetailCullDistance);
+		}
 		Component->SetupAttachment(RootComponent);
 		Component->RegisterComponent();
 		AllParts.Add(Component);

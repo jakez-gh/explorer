@@ -1,6 +1,7 @@
 #include "Game/ExplorerGameMode.h"
 #include "Flight/FlightPawn.h"
 #include "Game/ExplorerPlayerController.h"
+#include "Game/ExplorerSaveGame.h"
 #include "Procedural/TerrainStreamer.h"
 #include "Procedural/WorldGen.h"
 #include "Components/DirectionalLightComponent.h"
@@ -43,28 +44,25 @@ void AExplorerGameMode::BeginPlay()
 
 void AExplorerGameMode::SetupDreamAtmosphere()
 {
-	// A low, warm sun: the long light of late afternoon.
+	// Natural mid-afternoon sun: high enough for true colour, low enough for long shadows and relief.
 	for (TActorIterator<ADirectionalLight> It(GetWorld()); It; ++It)
 	{
 		UDirectionalLightComponent* Sun = Cast<UDirectionalLightComponent>(It->GetLightComponent());
 		Sun->SetMobility(EComponentMobility::Movable);
-		Sun->SetWorldRotation(FRotator(-13.0f, 35.0f, 0.0f));
-		Sun->SetLightColor(FLinearColor(1.0f, 0.84f, 0.66f));
-		Sun->SetIntensity(7.0f);
+		Sun->SetWorldRotation(FRotator(-32.0f, 35.0f, 0.0f));
+		Sun->SetLightColor(FLinearColor(1.0f, 0.96f, 0.9f));
 	}
 
-	// Soft haze that swallows the far distance, glowing warm towards the sun.
+	// Light atmospheric haze; aerial perspective from the sky atmosphere does most of the work.
 	for (TActorIterator<AExponentialHeightFog> It(GetWorld()); It; ++It)
 	{
 		UExponentialHeightFogComponent* Fog = It->GetComponent();
-		// Low falloff keeps the haze nearly as thick up high as near the ground, so the edge of the
-		// streamed world dissolves at any altitude.
-		Fog->SetFogDensity(0.016f);
-		Fog->SetFogHeightFalloff(0.03f);
-		Fog->SetStartDistance(25000.0f);
-		Fog->SetFogInscatteringColor(FLinearColor(0.48f, 0.44f, 0.58f));
-		Fog->SetDirectionalInscatteringExponent(6.0f);
-		Fog->SetDirectionalInscatteringColor(FLinearColor(0.55f, 0.36f, 0.24f));
+		Fog->SetFogDensity(0.012f);
+		Fog->SetFogHeightFalloff(0.04f);
+		Fog->SetStartDistance(40000.0f);
+		Fog->SetFogInscatteringColor(FLinearColor(0.45f, 0.55f, 0.7f));
+		Fog->SetDirectionalInscatteringExponent(8.0f);
+		Fog->SetDirectionalInscatteringColor(FLinearColor(0.35f, 0.3f, 0.25f));
 	}
 
 	for (TActorIterator<ASkyLight> It(GetWorld()); It; ++It)
@@ -72,24 +70,16 @@ void AExplorerGameMode::SetupDreamAtmosphere()
 		It->GetLightComponent()->RecaptureSky();
 	}
 
-	// Gentle bloom, a vignette, and slightly warm, lifted colour.
+	// Camera-like post: restrained bloom and vignette, no stylised colour shifts.
 	APostProcessVolume* Post = GetWorld()->SpawnActor<APostProcessVolume>();
 	Post->bUnbound = true;
 	FPostProcessSettings& S = Post->Settings;
 	S.bOverride_BloomIntensity = true;
-	S.BloomIntensity = 1.6f;
+	S.BloomIntensity = 0.5f;
 	S.bOverride_VignetteIntensity = true;
-	S.VignetteIntensity = 0.6f;
-	S.bOverride_WhiteTemp = true;
-	S.WhiteTemp = 5900.0f;
-	S.bOverride_ColorSaturation = true;
-	S.ColorSaturation = FVector4(1.08f, 1.05f, 1.12f, 1.0f);
-	S.bOverride_ColorGamma = true;
-	S.ColorGamma = FVector4(1.0f, 1.0f, 1.0f, 1.04f);
-	S.bOverride_SceneFringeIntensity = true;
-	S.SceneFringeIntensity = 0.5f;
+	S.VignetteIntensity = 0.25f;
 	S.bOverride_MotionBlurAmount = true;
-	S.MotionBlurAmount = 0.15f;
+	S.MotionBlurAmount = 0.2f;
 }
 
 APawn* AExplorerGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)
@@ -141,6 +131,15 @@ APawn* AExplorerGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPla
 		Report(TEXT("village"), ATerrainStreamer::VillageCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindVillage(X, Y, P); });
 		Report(TEXT("city"), ATerrainStreamer::CityCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindCity(X, Y, P); });
 		Report(TEXT("floating island"), ATerrainStreamer::IslandCellSize(), [](int32 X, int32 Y, FVector& P) { float R; return ATerrainStreamer::FindFloatingIsland(X, Y, P, R); });
+		Report(TEXT("lighthouse"), ATerrainStreamer::LighthouseCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindLighthouse(X, Y, P); });
+		Report(TEXT("stone circle"), ATerrainStreamer::StoneCircleCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindStoneCircle(X, Y, P); });
+		Report(TEXT("volcano"), WorldGen::VolcanoCellSize(), [](int32 X, int32 Y, FVector& P)
+		{
+			FVector2D C; float R, H;
+			if (!WorldGen::FindVolcano(X, Y, C, R, H)) return false;
+			P = FVector(C, WorldGen::Height(C.X, C.Y));
+			return true;
+		});
 	}
 
 	// -StartX= / -StartY= pick the starting point (world units); otherwise start over land near the origin.
@@ -154,6 +153,15 @@ APawn* AExplorerGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPla
 		FParse::Value(FCommandLine::Get(), TEXT("StartYaw="), Rotation.Yaw);
 		FParse::Value(FCommandLine::Get(), TEXT("StartPitch="), Rotation.Pitch);
 		return SpawnDefaultPawnAtTransform(NewPlayer, FTransform(Rotation, Location));
+	}
+
+	// Continue where we left off, unless -NewGame asks for a fresh start.
+	if (!FParse::Param(FCommandLine::Get(), TEXT("NewGame")))
+	{
+		if (const UExplorerSaveGame* Save = UExplorerSaveGame::Load())
+		{
+			return SpawnDefaultPawnAtTransform(NewPlayer, FTransform(FRotator(Save->Pitch, Save->Yaw, 0.0f), Save->Location));
+		}
 	}
 	for (int32 Ring = 0; Ring < 40; ++Ring)
 	{

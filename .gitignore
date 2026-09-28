@@ -31,3 +31,7 @@ __pycache__/
 # Local development
 .local/
 local_config.ini
+
+# Engine Starter Content: copied in by Tools/setup_content.ps1
+Content/StarterContent/
+Content/Developers/

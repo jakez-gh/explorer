@@ -1,15 +1,21 @@
-"""Generates Explorer's materials. Run headless:
+"""Generates Explorer's materials from Starter Content textures. Run headless:
 
     UnrealEditor-Cmd.exe <repo>/Explorer.uproject -run=pythonscript -script="<repo>/Tools/create_materials.py" -unattended
 
-Assets are written to /Game/Explorer/Materials and are safe to regenerate.
+Needs /Game/StarterContent (see CLAUDE.md). Assets go to /Game/Explorer/Materials and are safe to regenerate.
 """
 
 import unreal
 
 FOLDER = "/Game/Explorer/Materials"
+SC = "/Game/StarterContent/Textures"
 lib = unreal.MaterialEditingLibrary
 tools = unreal.AssetToolsHelpers.get_asset_tools()
+MP = unreal.MaterialProperty
+
+
+def tex(name):
+    return unreal.load_asset(f"{SC}/{name}.{name}")
 
 
 def new_material(name):
@@ -19,15 +25,85 @@ def new_material(name):
     return tools.create_asset(name, FOLDER, unreal.Material, unreal.MaterialFactoryNew())
 
 
-def expr(mat, cls, x, y, **props):
-    node = lib.create_material_expression(mat, cls, x, y)
-    for key, value in props.items():
-        node.set_editor_property(key, value)
-    return node
+class Graph:
+    """Small helper for building material graphs left-to-right."""
 
+    def __init__(self, material):
+        self.m = material
+        self.y = 0
 
-def const(mat, value, x, y):
-    return expr(mat, unreal.MaterialExpressionConstant, x, y, r=value)
+    def node(self, cls, **props):
+        self.y += 60
+        n = lib.create_material_expression(self.m, cls, -1600 + (self.y // 1200) * 300, self.y % 1200)
+        for key, value in props.items():
+            n.set_editor_property(key, value)
+        return n
+
+    def link(self, src, dst, dst_input="", src_output=""):
+        lib.connect_material_expressions(src, src_output, dst, dst_input)
+        return dst
+
+    def const(self, v):
+        return self.node(unreal.MaterialExpressionConstant, r=v)
+
+    def color(self, r, g, b):
+        return self.node(unreal.MaterialExpressionConstant3Vector, constant=unreal.LinearColor(r, g, b, 1))
+
+    def op(self, cls, a, b, a_out="", b_out=""):
+        n = self.node(cls)
+        self.link(a, n, "A", a_out)
+        self.link(b, n, "B", b_out)
+        return n
+
+    def mul(self, a, b, a_out="", b_out=""):
+        return self.op(unreal.MaterialExpressionMultiply, a, b, a_out, b_out)
+
+    def add(self, a, b, a_out="", b_out=""):
+        return self.op(unreal.MaterialExpressionAdd, a, b, a_out, b_out)
+
+    def lerp(self, a, b, alpha, alpha_out=""):
+        n = self.node(unreal.MaterialExpressionLinearInterpolate)
+        self.link(a, n, "A")
+        self.link(b, n, "B")
+        self.link(alpha, n, "Alpha", alpha_out)
+        return n
+
+    def mask(self, src, r=False, g=False, b=False, a=False):
+        n = self.node(unreal.MaterialExpressionComponentMask, r=r, g=g, b=b, a=a)
+        return self.link(src, n)
+
+    def saturate(self, src):
+        return self.link(src, self.node(unreal.MaterialExpressionSaturate))
+
+    def sample(self, texture, uv, normal=False):
+        n = self.node(unreal.MaterialExpressionTextureSample, texture=texture)
+        if normal:
+            n.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+        return self.link(uv, n, "UVs")
+
+    def world_uvs(self, scale_cm):
+        """World-space UVs for the three projection planes, one tile per scale_cm."""
+        wp = self.node(unreal.MaterialExpressionWorldPosition)
+        inv = self.const(1.0 / scale_cm)
+        return (self.mul(self.mask(wp, r=True, g=True), inv),
+                self.mul(self.mask(wp, r=True, b=True), inv),
+                self.mul(self.mask(wp, g=True, b=True), inv))
+
+    def triplanar(self, texture, scale_cm, weights):
+        """Blend three projections by squared world normal (weights sum to one for unit normals)."""
+        xy, xz, yz = self.world_uvs(scale_cm)
+        wx, wy, wz = weights
+        s = self.mul(self.sample(texture, yz), wx)
+        s = self.add(s, self.mul(self.sample(texture, xz), wy))
+        return self.add(s, self.mul(self.sample(texture, xy), wz))
+
+    def normal_weights(self):
+        n = self.node(unreal.MaterialExpressionVertexNormalWS)
+        comps = []
+        for axis in ("r", "g", "b"):
+            c = self.mask(n, **{axis: True})
+            comps.append(self.mul(c, c))
+        return comps
 
 
 def finish(mat):
@@ -36,51 +112,148 @@ def finish(mat):
     unreal.log(f"Created {mat.get_path_name()}")
 
 
-# Terrain: colour comes from per-vertex biome colours; alpha carries wetness (0 = dry/rough, 1 = glossy).
+# ---------------------------------------------------------------------------------------------
+# Terrain. Vertex colour carries layer weights: R sand, G rock, B snow, A forest floor.
+# UV1 carries (dryness, wetness). Grass is the base layer.
 m = new_material("M_Terrain")
-vc = expr(m, unreal.MaterialExpressionVertexColor, -600, 0)
-lib.connect_material_property(vc, "", unreal.MaterialProperty.MP_BASE_COLOR)
-rough = expr(m, unreal.MaterialExpressionLinearInterpolate, -300, 200)
-lib.connect_material_expressions(const(m, 0.9, -500, 200), "", rough, "A")
-lib.connect_material_expressions(const(m, 0.35, -500, 280), "", rough, "B")
-lib.connect_material_expressions(vc, "A", rough, "Alpha")
-lib.connect_material_property(rough, "", unreal.MaterialProperty.MP_ROUGHNESS)
-lib.connect_material_property(const(m, 0.25, -300, 360), "", unreal.MaterialProperty.MP_SPECULAR)
+g = Graph(m)
+vc = g.node(unreal.MaterialExpressionVertexColor)
+uv1 = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=1)
+dryness = g.mask(uv1, r=True)
+wetness = g.mask(uv1, g=True)
+weights = g.normal_weights()
+
+near_xy, _, _ = g.world_uvs(350.0)
+far_xy, _, _ = g.world_uvs(1900.0)
+macro_xy, _, _ = g.world_uvs(9000.0)
+macro = g.mask(g.sample(tex("T_MacroVariation"), macro_xy), r=True)
+macro_scale = g.lerp(g.const(0.72), g.const(1.18), macro)
+
+grass = g.lerp(g.sample(tex("T_Ground_Grass_D"), near_xy), g.sample(tex("T_Ground_Grass_D"), far_xy), g.const(0.5))
+dry_grass = g.mul(grass, g.color(1.45, 1.12, 0.5))
+color = g.lerp(grass, dry_grass, dryness)
+
+moss_xy, _, _ = g.world_uvs(420.0)
+moss = g.mul(g.sample(tex("T_ground_Moss_D"), moss_xy), g.color(0.75, 0.85, 0.7))
+color = g.lerp(color, moss, vc, "A")
+
+sand_xy, _, _ = g.world_uvs(300.0)
+gravel = g.sample(tex("T_Ground_Gravel_D"), sand_xy)
+sand = g.lerp(g.color(0.78, 0.66, 0.47), g.mul(gravel, g.color(1.3, 1.1, 0.8)), g.const(0.3))
+wet_sand = g.mul(sand, g.const(0.6))
+sand = g.lerp(sand, wet_sand, wetness)
+color = g.lerp(color, sand, vc, "R")
+
+slate = g.triplanar(tex("T_Rock_Slate_D"), 900.0, weights)
+sandstone = g.triplanar(tex("T_Rock_Sandstone_D"), 900.0, weights)
+rock = g.lerp(slate, sandstone, dryness)
+color = g.lerp(color, rock, vc, "G")
+
+snow = g.mul(g.color(0.86, 0.89, 0.94), g.lerp(g.const(0.93), g.const(1.0), macro))
+color = g.lerp(color, snow, vc, "B")
+lib.connect_material_property(g.mul(color, macro_scale), "", MP.MP_BASE_COLOR)
+
+normal = g.sample(tex("T_Ground_Grass_N"), near_xy, normal=True)
+normal = g.lerp(normal, g.sample(tex("T_Ground_Moss_N"), moss_xy, normal=True), vc, "A")
+normal = g.lerp(normal, g.sample(tex("T_Ground_Gravel_N"), sand_xy, normal=True), vc, "R")
+rock_n_xy, _, _ = g.world_uvs(900.0)
+normal = g.lerp(normal, g.sample(tex("T_Rock_Slate_N"), rock_n_xy, normal=True), vc, "G")
+normal = g.lerp(normal, g.color(0, 0, 1), vc, "B")
+lib.connect_material_property(normal, "", MP.MP_NORMAL)
+
+rough = g.lerp(g.const(0.94), g.const(0.82), vc, "G")
+rough = g.lerp(rough, g.const(0.55), vc, "B")
+rough = g.lerp(rough, g.const(0.3), wetness)
+lib.connect_material_property(rough, "", MP.MP_ROUGHNESS)
+lib.connect_material_property(g.const(0.35), "", MP.MP_SPECULAR)
 finish(m)
 
-# Water: deep teal with a soft pale glow at grazing angles.
+# ---------------------------------------------------------------------------------------------
+# Water: deep teal, two layers of panning ripples, glossy.
 m = new_material("M_Water")
-deep = expr(m, unreal.MaterialExpressionConstant3Vector, -700, -100, constant=unreal.LinearColor(0.01, 0.07, 0.11, 1))
-shallow = expr(m, unreal.MaterialExpressionConstant3Vector, -700, 0, constant=unreal.LinearColor(0.05, 0.22, 0.28, 1))
-fres = expr(m, unreal.MaterialExpressionFresnel, -700, 120, exponent=4.0)
-color = expr(m, unreal.MaterialExpressionLinearInterpolate, -400, 0)
-lib.connect_material_expressions(deep, "", color, "A")
-lib.connect_material_expressions(shallow, "", color, "B")
-lib.connect_material_expressions(fres, "", color, "Alpha")
-lib.connect_material_property(color, "", unreal.MaterialProperty.MP_BASE_COLOR)
-glow_tint = expr(m, unreal.MaterialExpressionConstant3Vector, -700, 260, constant=unreal.LinearColor(0.35, 0.3, 0.45, 1))
-glow = expr(m, unreal.MaterialExpressionMultiply, -400, 220)
-lib.connect_material_expressions(fres, "", glow, "A")
-lib.connect_material_expressions(glow_tint, "", glow, "B")
-lib.connect_material_property(glow, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-lib.connect_material_property(const(m, 0.06, -400, 360), "", unreal.MaterialProperty.MP_ROUGHNESS)
-lib.connect_material_property(const(m, 0.6, -400, 440), "", unreal.MaterialProperty.MP_SPECULAR)
+g = Graph(m)
+big, _, _ = g.world_uvs(2600.0)
+small, _, _ = g.world_uvs(700.0)
+pan_a = g.link(big, g.node(unreal.MaterialExpressionPanner, speed_x=0.012, speed_y=0.008), "Coordinate")
+pan_b = g.link(small, g.node(unreal.MaterialExpressionPanner, speed_x=-0.02, speed_y=0.025), "Coordinate")
+water_n = g.add(g.sample(tex("T_Water_N"), pan_a, normal=True), g.sample(tex("T_Water_N"), pan_b, normal=True))
+water_n = g.lerp(g.color(0, 0, 1), water_n, g.const(0.45))
+lib.connect_material_property(water_n, "", MP.MP_NORMAL)
+fres = g.node(unreal.MaterialExpressionFresnel, exponent=5.0)
+water_c = g.lerp(g.color(0.006, 0.035, 0.045), g.color(0.03, 0.09, 0.1), fres)
+lib.connect_material_property(water_c, "", MP.MP_BASE_COLOR)
+lib.connect_material_property(g.const(0.03), "", MP.MP_ROUGHNESS)
+lib.connect_material_property(g.const(0.9), "", MP.MP_SPECULAR)
 finish(m)
 
-# Instanced props (trees, rocks, buildings, islands): per-instance custom data = R, G, B, glow.
-m = new_material("M_InstanceColor")
+# ---------------------------------------------------------------------------------------------
+# Props (buildings, islands): world-projected surfaces. Per-instance custom data:
+# [0..2] tint, [3] glow, [4] surface: 0 rock, 1 concrete, 2 brick, 3 slate roof, 4 glass, 5 grass.
+m = new_material("M_Prop")
 m.set_editor_property("used_with_instanced_static_meshes", True)
-channels = [expr(m, unreal.MaterialExpressionPerInstanceCustomData, -900, i * 90, data_index=i) for i in range(4)]
-rg = expr(m, unreal.MaterialExpressionAppendVector, -650, 40)
-lib.connect_material_expressions(channels[0], "", rg, "A")
-lib.connect_material_expressions(channels[1], "", rg, "B")
-rgb = expr(m, unreal.MaterialExpressionAppendVector, -450, 80)
-lib.connect_material_expressions(rg, "", rgb, "A")
-lib.connect_material_expressions(channels[2], "", rgb, "B")
-lib.connect_material_property(rgb, "", unreal.MaterialProperty.MP_BASE_COLOR)
-emissive = expr(m, unreal.MaterialExpressionMultiply, -250, 260)
-lib.connect_material_expressions(rgb, "", emissive, "A")
-lib.connect_material_expressions(channels[3], "", emissive, "B")
-lib.connect_material_property(emissive, "", unreal.MaterialProperty.MP_EMISSIVE_COLOR)
-lib.connect_material_property(const(m, 0.8, -250, 380), "", unreal.MaterialProperty.MP_ROUGHNESS)
+g = Graph(m)
+cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(5)]
+tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
+weights = g.normal_weights()
+surface = cd[4]
+
+
+def step(k):
+    return g.saturate(g.op(unreal.MaterialExpressionSubtract, surface, g.const(k)))
+
+
+surf = g.triplanar(tex("T_Rock_Basalt_D"), 700.0, weights)
+surf = g.lerp(surf, g.triplanar(tex("T_Concrete_Poured_D"), 500.0, weights), step(0.0))
+surf = g.lerp(surf, g.triplanar(tex("T_Brick_Clay_Old_D"), 250.0, weights), step(1.0))
+surf = g.lerp(surf, g.triplanar(tex("T_Rock_Slate_D"), 300.0, weights), step(2.0))
+surf = g.lerp(surf, g.color(0.05, 0.07, 0.09), step(3.0))
+grass_xy, _, _ = g.world_uvs(400.0)
+surf = g.lerp(surf, g.sample(tex("T_Ground_Grass_D"), grass_xy), step(4.0))
+base = g.mul(surf, tint)
+lib.connect_material_property(base, "", MP.MP_BASE_COLOR)
+lib.connect_material_property(g.mul(base, cd[3]), "", MP.MP_EMISSIVE_COLOR)
+rough = g.lerp(g.const(0.85), g.const(0.72), step(0.0))
+rough = g.lerp(rough, g.const(0.08), step(3.0))
+rough = g.lerp(rough, g.const(0.92), step(4.0))
+lib.connect_material_property(rough, "", MP.MP_ROUGHNESS)
+lib.connect_material_property(g.lerp(g.const(0.0), g.const(0.6), step(3.0)), "", MP.MP_METALLIC)
 finish(m)
+
+# ---------------------------------------------------------------------------------------------
+# Rocks: scanned rock mesh normals with world-projected basalt. Custom data [0..2] tint.
+m = new_material("M_RockMesh")
+m.set_editor_property("used_with_instanced_static_meshes", True)
+g = Graph(m)
+cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
+tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
+mesh_uv = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=0)
+rock = g.triplanar(tex("T_Rock_Basalt_D"), 600.0, g.normal_weights())
+lib.connect_material_property(g.mul(rock, tint), "", MP.MP_BASE_COLOR)
+lib.connect_material_property(g.sample(tex("T_RockMesh_N"), mesh_uv, normal=True), "", MP.MP_NORMAL)
+lib.connect_material_property(g.const(0.88), "", MP.MP_ROUGHNESS)
+finish(m)
+
+# ---------------------------------------------------------------------------------------------
+# Foliage: scanned bush leaves, two-sided with light passing through. Custom data [0..2] tint.
+m = new_material("M_Foliage")
+m.set_editor_property("used_with_instanced_static_meshes", True)
+m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_MASKED)
+m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_TWO_SIDED_FOLIAGE)
+m.set_editor_property("two_sided", True)
+g = Graph(m)
+cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
+tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
+mesh_uv = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=0)
+leaves = g.sample(tex("T_Bush_D"), mesh_uv)
+color = g.mul(leaves, tint)
+lib.connect_material_property(color, "", MP.MP_BASE_COLOR)
+lib.connect_material_property(leaves, "A", MP.MP_OPACITY_MASK)
+lib.connect_material_property(g.sample(tex("T_Bush_N"), mesh_uv, normal=True), "", MP.MP_NORMAL)
+lib.connect_material_property(g.mul(color, g.color(0.6, 0.8, 0.3)), "", MP.MP_SUBSURFACE_COLOR)
+lib.connect_material_property(g.const(0.75), "", MP.MP_ROUGHNESS)
+finish(m)
+
+for old in ("M_InstanceColor",):
+    path = f"{FOLDER}/{old}"
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        unreal.EditorAssetLibrary.delete_asset(path)
