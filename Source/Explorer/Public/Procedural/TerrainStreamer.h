@@ -42,7 +42,7 @@ public:
 
 	// Chunks within this radius get scanned trees (beyond the detail radius, trees only).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
-	int32 TreeRadius = 8;
+	int32 TreeRadius = 11;
 
 	// Chunks within this radius get collision.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")

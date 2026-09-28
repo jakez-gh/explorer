@@ -5,6 +5,9 @@
 #include "Components/SphereComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/OverlapResult.h"
+#include "Engine/World.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
@@ -185,6 +188,29 @@ void AFlightPawn::Tick(float DeltaTime)
 	// Speed follows the trigger directly: released means stop and hover. Travel is level; height is
 	// handled by the altitude hold below.
 	Speed = MaxFlightSpeed * FMath::Pow(Throttle, ThrottleCurve);
+
+	// Pushing through a tree's crown: the nearer the trunk (and the lower, among the branches), the more
+	// the leaves and branches hold you back.
+	{
+		float Closeness = 0.0f;
+		TArray<FOverlapResult> Overlaps;
+		const FVector Here = GetActorLocation();
+		if (GetWorld()->OverlapMultiByObjectType(Overlaps, Here, FQuat::Identity, FCollisionObjectQueryParams(ECC_WorldStatic), FCollisionShape::MakeSphere(CanopyRadius)))
+		{
+			for (const FOverlapResult& Overlap : Overlaps)
+			{
+				const UInstancedStaticMeshComponent* Trunks = Cast<UInstancedStaticMeshComponent>(Overlap.GetComponent());
+				FTransform Instance;
+				if (Trunks && Trunks->ComponentHasTag(TEXT("TreeTrunk")) && Trunks->GetInstanceTransform(Overlap.ItemIndex, Instance, true))
+				{
+					const float Horizontal = FVector2D::Distance(FVector2D(Here), FVector2D(Instance.GetLocation()));
+					Closeness = FMath::Max(Closeness, 1.0f - Horizontal / CanopyRadius);
+				}
+			}
+		}
+		Foliage = FMath::FInterpTo(Foliage, Closeness, DeltaTime, 6.0f);
+		Speed *= 1.0f - CanopyDrag * Foliage;
+	}
 	// Pitch: the stick tilts the nose and you fly where it points. Released, the nose eases back to level
 	// and gentle terrain following takes over from whatever height you're at.
 	const bool bPitching = FMath::Abs(Steer.Y) > 0.05f;
@@ -288,7 +314,10 @@ void AFlightPawn::Tick(float DeltaTime)
 
 	// Let the camera breathe; speed never changes the view.
 	BobTime += DeltaTime;
-	CameraComponent->SetRelativeLocation(FVector(0.0f, 0.0f, FMath::Sin(BobTime * 2.0f * PI / BobPeriod) * BobAmplitude));
+	// Brushing through branches jostles the view a little, more the faster you push.
+	const float Jostle = Foliage * FMath::Clamp(Speed / 1500.0f, 0.0f, 1.0f) * 6.0f;
+	const FVector Shake(0.0f, FMath::PerlinNoise1D(BobTime * 9.0f) * Jostle, FMath::PerlinNoise1D(BobTime * 11.0f + 5.0f) * Jostle);
+	CameraComponent->SetRelativeLocation(FVector(0.0f, 0.0f, FMath::Sin(BobTime * 2.0f * PI / BobPeriod) * BobAmplitude) + Shake);
 
 	// Remember where we are.
 	SaveTimer += DeltaTime;

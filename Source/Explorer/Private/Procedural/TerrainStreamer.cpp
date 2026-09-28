@@ -1959,8 +1959,14 @@ UHierarchicalInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPa
 			Component->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
 			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		}
+		if (Part >= Scanned0)
+		{
+			// The packs' wind animation (world position offset) distorts on scaled Nanite instances.
+			Component->SetEvaluateWorldPositionOffset(false);
+		}
 		if (Part == Trunk)
 		{
+			Component->ComponentTags.Add(TEXT("TreeTrunk"));
 			Component->SetHiddenInGame(true);
 			Component->SetCastShadow(false);
 		}

@@ -91,7 +91,14 @@ protected:
 	float MinGroundClearance = 200.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
-	float MaxAltitude = 300000.0f;
+	float MaxAltitude = 50000.0f;
+
+	// Flying into a tree's crown slows you, up to this fraction at the trunk, within this radius (cm).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Trees")
+	float CanopyDrag = 0.75f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Trees")
+	float CanopyRadius = 700.0f;
 
 	// How fast full stick changes the held height near the ground (cm/s); it scales up with height.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
@@ -153,6 +160,8 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UInputAction> RiseAction;
 
+	// 0 in the open, 1 pressed against a trunk; smoothed.
+	float Foliage = 0.0f;
 	float TargetAltitude = 1000.0f;
 	float VerticalSpeed = 0.0f;
 	float FlightYaw = 0.0f;
