@@ -38,7 +38,7 @@ public:
 
 	// Chunks within this radius get vegetation, rocks and small settlements.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
-	int32 DetailRadius = 4;
+	int32 DetailRadius = 5;
 
 	// Chunks within this radius get collision.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
@@ -48,10 +48,23 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
 	float BuildBudgetMs = 6.0f;
 
+	// Beyond the chunk disc, coarse 4x4-chunk tiles carry the land out to this radius (in chunks).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
+	int32 FarRadius = 48;
+
+	// Blades of grass are planted within this distance of the viewer.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Grass")
+	float GrassRadius = 12000.0f;
+
+	// No grass is built when the viewer is higher than this above the ground (it couldn't be seen).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Grass")
+	float GrassMaxViewHeight = 25000.0f;
+
 	// Terrain surface height in world space at a world XY position.
 	UFUNCTION(BlueprintCallable, Category = "Terrain")
 	float GetHeightAtLocation(FVector2D WorldXY) const;
 
+	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
 
 	// Landmark placement, shared by generation and the -BiomeReport finder. Each returns false if the
@@ -128,6 +141,12 @@ private:
 	int32 StepForDistance(float DistanceInChunks) const;
 
 	void BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32 Step, bool bWithCollision);
+	// Builds an N x N quad terrain patch with skirts at Origin (its Z offsets the whole patch).
+	void BuildSurface(UProceduralMeshComponent* Mesh, const FVector& Origin, int32 N, float Spacing, bool bWithCollision) const;
+	void UpdateFarTerrain(const FIntPoint& Center, double Deadline);
+	void UpdateGrass(const FVector& ViewLocation, double Deadline);
+	void BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstancedStaticMeshComponent* Component) const;
+	UStaticMesh* CreateGrassClumpMesh();
 	void BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps Level);
 	void AddVegetation(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddVillages(const FIntPoint& Coord, FPropBatch& Batch) const;
@@ -143,6 +162,15 @@ private:
 	UHierarchicalInstancedStaticMeshComponent* AcquirePart(EPropPart Part);
 
 	TMap<FIntPoint, FChunk> Chunks;
+	TMap<FIntPoint, UProceduralMeshComponent*> FarTiles;
+	TMap<FIntPoint, UHierarchicalInstancedStaticMeshComponent*> GrassTiles;
+	TArray<UHierarchicalInstancedStaticMeshComponent*> GrassPool;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UStaticMesh> GrassMesh;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> GrassMaterial;
 
 	UPROPERTY(VisibleAnywhere, Category = "Terrain")
 	TObjectPtr<UStaticMeshComponent> Ocean;

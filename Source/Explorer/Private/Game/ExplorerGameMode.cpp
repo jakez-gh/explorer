@@ -53,13 +53,13 @@ void AExplorerGameMode::SetupDreamAtmosphere()
 		Sun->SetLightColor(FLinearColor(1.0f, 0.96f, 0.9f));
 	}
 
-	// Light atmospheric haze; aerial perspective from the sky atmosphere does most of the work.
+	// Clear air: only a faint low haze; the sky atmosphere's aerial perspective handles real distance.
 	for (TActorIterator<AExponentialHeightFog> It(GetWorld()); It; ++It)
 	{
 		UExponentialHeightFogComponent* Fog = It->GetComponent();
-		Fog->SetFogDensity(0.012f);
-		Fog->SetFogHeightFalloff(0.04f);
-		Fog->SetStartDistance(40000.0f);
+		Fog->SetFogDensity(0.0025f);
+		Fog->SetFogHeightFalloff(0.2f);
+		Fog->SetStartDistance(80000.0f);
 		Fog->SetFogInscatteringColor(FLinearColor(0.45f, 0.55f, 0.7f));
 		Fog->SetDirectionalInscatteringExponent(8.0f);
 		Fog->SetDirectionalInscatteringColor(FLinearColor(0.35f, 0.3f, 0.25f));
@@ -79,7 +79,7 @@ void AExplorerGameMode::SetupDreamAtmosphere()
 	S.bOverride_VignetteIntensity = true;
 	S.VignetteIntensity = 0.25f;
 	S.bOverride_MotionBlurAmount = true;
-	S.MotionBlurAmount = 0.2f;
+	S.MotionBlurAmount = 0.0f;
 }
 
 APawn* AExplorerGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPlayer, AActor* StartSpot)

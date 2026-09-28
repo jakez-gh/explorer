@@ -61,8 +61,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
 	float AutoLevelRate = 0.4f;
 
+	// Flight-stick convention: push forward to dip the nose, pull back to climb.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
-	bool bInvertPitch = false;
+	bool bInvertPitch = true;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Steering")
 	float MaxBankAngle = 35.0f;
@@ -85,16 +86,20 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Look")
 	float MouseSensitivity = 0.15f;
 
-	// Below this height above ground or water, you're gently lifted.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Feel")
-	float GroundCushion = 8000.0f;
+	// Closest you can get to the ground or water when flying slowly (you can skim among the trees).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Ground")
+	float MinGroundClearance = 150.0f;
+
+	// Extra clearance per unit of speed, so fast flight stays safely above the terrain (seconds of warning).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Ground")
+	float ClearancePerSpeed = 0.15f;
+
+	// How gently a dive is levelled out as the ground approaches (seconds to close the remaining gap).
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Ground")
+	float GroundEaseTime = 0.6f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Feel")
-	float BaseFieldOfView = 90.0f;
-
-	// Extra field of view at top speed.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Feel")
-	float SpeedFieldOfView = 20.0f;
+	float FieldOfView = 90.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Feel")
 	float BobAmplitude = 6.0f;

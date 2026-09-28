@@ -129,12 +129,24 @@ macro_xy, _, _ = g.world_uvs(9000.0)
 macro = g.mask(g.sample(tex("T_MacroVariation"), macro_xy), r=True)
 macro_scale = g.lerp(g.const(0.72), g.const(1.18), macro)
 
-grass = g.lerp(g.sample(tex("T_Ground_Grass_D"), near_xy), g.sample(tex("T_Ground_Grass_D"), far_xy), g.const(0.5))
+# Anti-tiling: a second sample with swapped axes (so its pattern runs a different way) at an unrelated scale,
+# blended by large-scale noise, then faded to a flat, macro-varied colour with distance so no repeat shows.
+wp = g.node(unreal.MaterialExpressionWorldPosition)
+swapped = g.op(unreal.MaterialExpressionAppendVector, g.mask(wp, g=True), g.mask(wp, r=True))
+swapped_xy = g.mul(swapped, g.const(1.0 / 530.0))
+noise_xy, _, _ = g.world_uvs(4700.0)
+blend = g.mask(g.sample(tex("T_Perlin_Noise_M"), noise_xy), r=True)
+grass = g.lerp(g.sample(tex("T_Ground_Grass_D"), near_xy), g.sample(tex("T_Ground_Grass_D"), swapped_xy), blend)
+grass = g.lerp(grass, g.sample(tex("T_Ground_Grass_D"), far_xy), g.const(0.3))
+depth = g.node(unreal.MaterialExpressionPixelDepth)
+fade = g.saturate(g.mul(depth, g.const(1.0 / 25000.0)))
+grass = g.lerp(grass, g.color(0.1, 0.16, 0.045), g.mul(fade, g.const(0.85)))
 dry_grass = g.mul(grass, g.color(1.45, 1.12, 0.5))
 color = g.lerp(grass, dry_grass, dryness)
 
 moss_xy, _, _ = g.world_uvs(420.0)
 moss = g.mul(g.sample(tex("T_ground_Moss_D"), moss_xy), g.color(0.75, 0.85, 0.7))
+moss = g.lerp(moss, g.color(0.05, 0.09, 0.03), g.mul(fade, g.const(0.8)))
 color = g.lerp(color, moss, vc, "A")
 
 sand_xy, _, _ = g.world_uvs(300.0)
@@ -251,6 +263,38 @@ lib.connect_material_property(leaves, "A", MP.MP_OPACITY_MASK)
 lib.connect_material_property(g.sample(tex("T_Bush_N"), mesh_uv, normal=True), "", MP.MP_NORMAL)
 lib.connect_material_property(g.mul(color, g.color(0.6, 0.8, 0.3)), "", MP.MP_SUBSURFACE_COLOR)
 lib.connect_material_property(g.const(0.75), "", MP.MP_ROUGHNESS)
+finish(m)
+
+# ---------------------------------------------------------------------------------------------
+# Grass blades (runtime-built clump mesh): vertex colour R is height along the blade (0 root, 1 tip).
+# Custom data [0..2] tint. Blades sway with a wind wave that travels across the field.
+m = new_material("M_Grass")
+m.set_editor_property("used_with_instanced_static_meshes", True)
+m.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_TWO_SIDED_FOLIAGE)
+m.set_editor_property("two_sided", True)
+g = Graph(m)
+cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
+tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
+vc = g.node(unreal.MaterialExpressionVertexColor)
+height = g.mask(vc, r=True)
+blade = g.mul(g.lerp(g.color(0.02, 0.045, 0.01), g.color(0.13, 0.21, 0.045), height), tint)
+lib.connect_material_property(blade, "", MP.MP_BASE_COLOR)
+lib.connect_material_property(g.mul(blade, g.color(0.9, 1.2, 0.5)), "", MP.MP_SUBSURFACE_COLOR)
+lib.connect_material_property(g.const(0.6), "", MP.MP_ROUGHNESS)
+lib.connect_material_property(g.const(0.3), "", MP.MP_SPECULAR)
+wp = g.node(unreal.MaterialExpressionWorldPosition)
+phase = g.mul(g.add(g.mask(wp, r=True), g.mul(g.mask(wp, g=True), g.const(0.7))), g.const(0.004))
+wave = g.link(g.add(g.mul(g.node(unreal.MaterialExpressionTime), g.const(1.8)), phase), g.node(unreal.MaterialExpressionSine))
+sway = g.mul(g.mul(wave, g.const(9.0)), g.mul(height, height))
+offset = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, sway, g.mul(sway, g.const(0.6))), g.const(0.0))
+# World position offset isn't in the Python MaterialProperty enum; set the material input directly.
+try:
+    wpo = m.get_editor_property("world_position_offset")
+    wpo.set_editor_property("expression", offset)
+    m.set_editor_property("world_position_offset", wpo)
+    unreal.log("M_Grass: wind sway connected")
+except Exception as ex:
+    unreal.log_warning(f"M_Grass: wind sway not connected ({ex}); grass will be still")
 finish(m)
 
 for old in ("M_InstanceColor",):

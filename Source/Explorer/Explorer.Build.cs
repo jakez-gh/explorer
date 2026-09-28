@@ -20,7 +20,9 @@ public class Explorer : ModuleRules
 			"EnhancedInput",
 			"Slate",
 			"SlateCore",
-			"ProceduralMeshComponent"
+			"ProceduralMeshComponent",
+			"MeshDescription",
+			"StaticMeshDescription"
 		});
 	}
 }

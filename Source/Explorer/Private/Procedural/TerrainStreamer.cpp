@@ -7,6 +7,8 @@
 #include "Engine/StaticMesh.h"
 #include "Kismet/GameplayStatics.h"
 #include "Materials/MaterialInterface.h"
+#include "MeshDescription.h"
+#include "StaticMeshAttributes.h"
 #include "UObject/ConstructorHelpers.h"
 
 using WorldGen::Srgb;
@@ -39,7 +41,16 @@ namespace
 	constexpr double StoneCircleRadius = 2500.0;
 
 	// Vegetation and rocks fade out beyond this distance; terrain colour carries forests further out.
-	constexpr float DetailCullDistance = 60000.0f;
+	constexpr float DetailCullDistance = 150000.0f;
+
+	// Far terrain tiles: 4x4 chunks each, dropped slightly so nearer, finer terrain always wins where they overlap.
+	constexpr int32 FarTileChunks = 4;
+	constexpr int32 FarTileResolution = 32;
+	constexpr float FarTileDrop = 2500.0f;
+
+	// Grass tiles align with the 5 m terrain grid so blades sit exactly on the rendered surface.
+	constexpr double GrassTileSize = 2000.0;
+	constexpr int32 GrassClumpsPerSide = 16;
 
 	float Smooth(float Edge0, float Edge1, float X)
 	{
@@ -84,6 +95,8 @@ ATerrainStreamer::ATerrainStreamer()
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> RockMat(TEXT("/Game/Explorer/Materials/M_RockMesh.M_RockMesh"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> FoliageMat(TEXT("/Game/Explorer/Materials/M_Foliage.M_Foliage"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WaterMat(TEXT("/Game/Explorer/Materials/M_Water.M_Water"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GrassMat(TEXT("/Game/Explorer/Materials/M_Grass.M_Grass"));
+	GrassMaterial = GrassMat.Object;
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> ConeMesh(TEXT("/Engine/BasicShapes/Cone.Cone"));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
@@ -122,11 +135,16 @@ bool ATerrainStreamer::ChunkContains(const FIntPoint& Coord, const FVector& Loca
 
 int32 ATerrainStreamer::StepForDistance(float DistanceInChunks) const
 {
-	if (DistanceInChunks <= 3.0f) return 1;
-	if (DistanceInChunks <= 6.0f) return 2;
-	if (DistanceInChunks <= 10.0f) return 4;
-	if (DistanceInChunks <= 13.0f) return 8;
-	return 16;
+	if (DistanceInChunks <= 5.0f) return 1;
+	if (DistanceInChunks <= 9.0f) return 2;
+	if (DistanceInChunks <= 13.0f) return 4;
+	return 8;
+}
+
+void ATerrainStreamer::BeginPlay()
+{
+	Super::BeginPlay();
+	GrassMesh = CreateGrassClumpMesh();
 }
 
 void ATerrainStreamer::Tick(float DeltaTime)
@@ -209,14 +227,290 @@ void ATerrainStreamer::Tick(float DeltaTime)
 			BuildProps(Item.Coord, Chunk, Item.Props);
 		}
 	}
+
+	UpdateGrass(ViewLocation, Deadline);
+	UpdateFarTerrain(Center, Deadline);
+}
+
+void ATerrainStreamer::UpdateFarTerrain(const FIntPoint& Center, double Deadline)
+{
+	auto FloorDiv = [](int32 A, int32 B) { return A >= 0 ? A / B : (A - B + 1) / B; };
+	const FIntPoint CenterTile(FloorDiv(Center.X, FarTileChunks), FloorDiv(Center.Y, FarTileChunks));
+	const int32 TileRadius = FarRadius / FarTileChunks;
+
+	// A tile is redundant once every chunk in it is inside the near disc.
+	auto Covered = [&](const FIntPoint& Tile)
+	{
+		const int32 Limit = FMath::Square(ViewRadius - 1);
+		for (const FIntPoint Corner : { FIntPoint(0, 0), FIntPoint(FarTileChunks - 1, 0), FIntPoint(0, FarTileChunks - 1), FIntPoint(FarTileChunks - 1, FarTileChunks - 1) })
+		{
+			if ((Tile * FarTileChunks + Corner - Center).SizeSquared() > Limit)
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+
+	for (auto It = FarTiles.CreateIterator(); It; ++It)
+	{
+		if ((It.Key() - CenterTile).SizeSquared() > FMath::Square(TileRadius + 1) || Covered(It.Key()))
+		{
+			It.Value()->ClearAllMeshSections();
+			It.Value()->SetVisibility(false);
+			MeshPool.Add(It.Value());
+			It.RemoveCurrent();
+		}
+	}
+
+	TArray<TPair<int32, FIntPoint>> Missing;
+	for (int32 DY = -TileRadius; DY <= TileRadius; ++DY)
+	{
+		for (int32 DX = -TileRadius; DX <= TileRadius; ++DX)
+		{
+			const FIntPoint Tile = CenterTile + FIntPoint(DX, DY);
+			if (DX * DX + DY * DY <= TileRadius * TileRadius && !FarTiles.Contains(Tile) && !Covered(Tile))
+			{
+				Missing.Emplace(DX * DX + DY * DY, Tile);
+			}
+		}
+	}
+	Missing.Sort([](const TPair<int32, FIntPoint>& A, const TPair<int32, FIntPoint>& B) { return A.Key < B.Key; });
+
+	const double TileSize = ChunkWorldSize() * FarTileChunks;
+	for (const TPair<int32, FIntPoint>& Item : Missing)
+	{
+		if (FPlatformTime::Seconds() > Deadline)
+		{
+			break;
+		}
+		UProceduralMeshComponent* Mesh = AcquireMesh();
+		BuildSurface(Mesh, FVector(Item.Value.X * TileSize, Item.Value.Y * TileSize, -FarTileDrop), FarTileResolution, TileSize / FarTileResolution, false);
+		FarTiles.Add(Item.Value, Mesh);
+	}
+}
+
+UStaticMesh* ATerrainStreamer::CreateGrassClumpMesh()
+{
+	// A clump of tapered, gently curved blades. Vertex colour R runs 0 at the root to 1 at the tip.
+	FMeshDescription Description;
+	FStaticMeshAttributes Attributes(Description);
+	Attributes.Register();
+	TVertexAttributesRef<FVector3f> Positions = Attributes.GetVertexPositions();
+	TVertexInstanceAttributesRef<FVector3f> Normals = Attributes.GetVertexInstanceNormals();
+	TVertexInstanceAttributesRef<FVector3f> Tangents = Attributes.GetVertexInstanceTangents();
+	TVertexInstanceAttributesRef<float> Signs = Attributes.GetVertexInstanceBinormalSigns();
+	TVertexInstanceAttributesRef<FVector4f> Colors = Attributes.GetVertexInstanceColors();
+	TVertexInstanceAttributesRef<FVector2f> UVs = Attributes.GetVertexInstanceUVs();
+	UVs.SetNumChannels(1);
+	const FPolygonGroupID Group = Description.CreatePolygonGroup();
+	Attributes.GetPolygonGroupMaterialSlotNames()[Group] = TEXT("Grass");
+
+	constexpr int32 Blades = 14;
+	constexpr int32 Segments = 3;
+	for (int32 Blade = 0; Blade < Blades; ++Blade)
+	{
+		auto Rand = [Blade](uint32 Seed) { return WorldGen::HashFloat(Blade, 7, 500 + Seed); };
+		const float Angle = Rand(0) * 2.0f * PI;
+		const float Spread = Rand(1) * 14.0f;
+		const FVector3f Base(FMath::Cos(Rand(2) * 2.0f * PI) * Spread, FMath::Sin(Rand(2) * 2.0f * PI) * Spread, 0.0f);
+		const FVector3f Facing(FMath::Cos(Angle), FMath::Sin(Angle), 0.0f);
+		const FVector3f Side(-Facing.Y, Facing.X, 0.0f);
+		const float Height = FMath::Lerp(32.0f, 68.0f, Rand(3));
+		const float HalfWidth = FMath::Lerp(0.6f, 1.1f, Rand(4));
+		const float Lean = FMath::Lerp(6.0f, 22.0f, Rand(5));
+		const FVector3f Normal = (Facing * 0.6f + FVector3f(0, 0, 0.8f)).GetSafeNormal();
+
+		TArray<FVertexInstanceID> Row[Segments + 1];
+		for (int32 S = 0; S <= Segments; ++S)
+		{
+			const float T = static_cast<float>(S) / Segments;
+			const FVector3f Center = Base + Facing * Lean * T * T + FVector3f(0, 0, Height * T);
+			const float W = HalfWidth * (1.0f - T * 0.92f);
+			for (const float Edge : { -1.0f, 1.0f })
+			{
+				const FVertexID Vertex = Description.CreateVertex();
+				Positions[Vertex] = Center + Side * W * Edge;
+				const FVertexInstanceID Instance = Description.CreateVertexInstance(Vertex);
+				Normals[Instance] = Normal;
+				Tangents[Instance] = Side;
+				Signs[Instance] = 1.0f;
+				Colors[Instance] = FVector4f(T, 0.0f, 0.0f, 1.0f);
+				UVs.Set(Instance, 0, FVector2f(Edge * 0.5f + 0.5f, 1.0f - T));
+				Row[S].Add(Instance);
+			}
+		}
+		for (int32 S = 0; S < Segments; ++S)
+		{
+			Description.CreateTriangle(Group, TArray<FVertexInstanceID>{ Row[S][0], Row[S + 1][0], Row[S][1] });
+			Description.CreateTriangle(Group, TArray<FVertexInstanceID>{ Row[S][1], Row[S + 1][0], Row[S + 1][1] });
+		}
+	}
+
+	UStaticMesh* Mesh = NewObject<UStaticMesh>(this, TEXT("SM_GrassClump"));
+	Mesh->GetStaticMaterials().Add(FStaticMaterial(GrassMaterial, TEXT("Grass"), TEXT("Grass")));
+	UStaticMesh::FBuildMeshDescriptionsParams Params;
+	Params.bFastBuild = true;
+	Params.bBuildSimpleCollision = false;
+	Mesh->BuildFromMeshDescriptions({ &Description }, Params);
+	return Mesh;
+}
+
+void ATerrainStreamer::UpdateGrass(const FVector& ViewLocation, double Deadline)
+{
+	const float Ground = FMath::Max(WorldGen::Height(ViewLocation.X, ViewLocation.Y), 0.0f);
+	const bool bWanted = GrassMesh && ViewLocation.Z - Ground < GrassMaxViewHeight;
+	const FIntPoint Center(FMath::FloorToInt(ViewLocation.X / GrassTileSize), FMath::FloorToInt(ViewLocation.Y / GrassTileSize));
+	const int32 Radius = FMath::CeilToInt(GrassRadius / GrassTileSize);
+
+	for (auto It = GrassTiles.CreateIterator(); It; ++It)
+	{
+		if (!bWanted || (It.Key() - Center).SizeSquared() > FMath::Square(Radius + 1))
+		{
+			It.Value()->ClearInstances();
+			It.Value()->SetVisibility(false);
+			GrassPool.Add(It.Value());
+			It.RemoveCurrent();
+		}
+	}
+	if (!bWanted)
+	{
+		return;
+	}
+
+	TArray<TPair<int32, FIntPoint>> Missing;
+	for (int32 DY = -Radius; DY <= Radius; ++DY)
+	{
+		for (int32 DX = -Radius; DX <= Radius; ++DX)
+		{
+			const FIntPoint Tile = Center + FIntPoint(DX, DY);
+			if (DX * DX + DY * DY <= Radius * Radius && !GrassTiles.Contains(Tile))
+			{
+				Missing.Emplace(DX * DX + DY * DY, Tile);
+			}
+		}
+	}
+	Missing.Sort([](const TPair<int32, FIntPoint>& A, const TPair<int32, FIntPoint>& B) { return A.Key < B.Key; });
+
+	for (int32 i = 0; i < Missing.Num(); ++i)
+	{
+		if (i > 0 && FPlatformTime::Seconds() > Deadline)
+		{
+			break;
+		}
+		UHierarchicalInstancedStaticMeshComponent* Component = GrassPool.Num() > 0 ? GrassPool.Pop(EAllowShrinking::No) : nullptr;
+		if (!Component)
+		{
+			Component = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
+			Component->SetMobility(EComponentMobility::Movable);
+			Component->SetStaticMesh(GrassMesh);
+			Component->SetMaterial(0, GrassMaterial);
+			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			Component->SetCastShadow(false);
+			Component->NumCustomDataFloats = 3;
+			Component->SetCullDistances(GrassRadius * 0.75f, GrassRadius);
+			Component->SetupAttachment(RootComponent);
+			Component->RegisterComponent();
+			AllParts.Add(Component);
+		}
+		Component->SetVisibility(true);
+		BuildGrassTile(Missing[i].Value, Component);
+		GrassTiles.Add(Missing[i].Value, Component);
+	}
+}
+
+void ATerrainStreamer::BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstancedStaticMeshComponent* Component) const
+{
+	// Sample the world on the terrain's own 5 m grid, then place each clump on the exact rendered triangle.
+	const int32 Cells = FMath::RoundToInt(GrassTileSize / GridSpacing);
+	const FVector2D Origin(Tile.X * GrassTileSize, Tile.Y * GrassTileSize);
+	TArray<FWorldSample> Samples;
+	Samples.SetNum((Cells + 1) * (Cells + 1));
+	for (int32 Y = 0; Y <= Cells; ++Y)
+	{
+		for (int32 X = 0; X <= Cells; ++X)
+		{
+			Samples[Y * (Cells + 1) + X] = WorldGen::Sample(Origin.X + X * GridSpacing, Origin.Y + Y * GridSpacing);
+		}
+	}
+	auto At = [&](int32 X, int32 Y) -> const FWorldSample& { return Samples[Y * (Cells + 1) + X]; };
+
+	TArray<FTransform> Transforms;
+	TArray<float> Data;
+	const float ClumpSpacing = GrassTileSize / GrassClumpsPerSide;
+	for (int32 GY = 0; GY < GrassClumpsPerSide; ++GY)
+	{
+		for (int32 GX = 0; GX < GrassClumpsPerSide; ++GX)
+		{
+			const int32 HX = Tile.X * GrassClumpsPerSide + GX;
+			const int32 HY = Tile.Y * GrassClumpsPerSide + GY;
+			const FVector2D P = Origin + FVector2D((GX + WorldGen::HashFloat(HX, HY, 601)) * ClumpSpacing, (GY + WorldGen::HashFloat(HX, HY, 602)) * ClumpSpacing);
+
+			const float CX = (P.X - Origin.X) / GridSpacing;
+			const float CY = (P.Y - Origin.Y) / GridSpacing;
+			const int32 IX = FMath::Clamp(FMath::FloorToInt(CX), 0, Cells - 1);
+			const int32 IY = FMath::Clamp(FMath::FloorToInt(CY), 0, Cells - 1);
+			const float FX = CX - IX;
+			const float FY = CY - IY;
+			const FWorldSample& BL = At(IX, IY);
+			const FWorldSample& BR = At(IX + 1, IY);
+			const FWorldSample& TL = At(IX, IY + 1);
+			const FWorldSample& TR = At(IX + 1, IY + 1);
+
+			// Same triangle split as the terrain mesh (diagonal from bottom-right to top-left).
+			const float Height = FX + FY <= 1.0f
+				? BL.Height + FX * (BR.Height - BL.Height) + FY * (TL.Height - BL.Height)
+				: TR.Height + (1.0f - FX) * (TL.Height - TR.Height) + (1.0f - FY) * (BR.Height - TR.Height);
+			if (Height < 40.0f)
+			{
+				continue;
+			}
+
+			const float Slope = FMath::Max(FMath::Abs(BR.Height - BL.Height), FMath::Abs(TL.Height - BL.Height)) / GridSpacing;
+			const FWorldSample& S = BL;
+			const float Grassy = (1.0f - S.Sand) * (1.0f - FMath::Max(S.Rock, Smooth(0.5f, 0.9f, Slope))) * (1.0f - S.Snow) * (1.0f - 0.55f * S.Forest);
+			if (WorldGen::HashFloat(HX, HY, 603) > Grassy * 0.95f)
+			{
+				continue;
+			}
+
+			const float Size = FMath::Lerp(0.7f, 1.3f, WorldGen::HashFloat(HX, HY, 604));
+			const float Tall = FMath::Lerp(0.8f, 1.35f, WorldGen::HashFloat(HX, HY, 605)) * FMath::Lerp(1.0f, 0.7f, S.Dryness);
+			Transforms.Add(FTransform(FRotator(0.0f, WorldGen::HashFloat(HX, HY, 606) * 360.0f, 0.0f), FVector(P.X, P.Y, Height - 3.0f), FVector(Size, Size, Size * Tall)));
+
+			// Lush green to summer straw with dryness; darker under trees; slight per-clump variation.
+			FLinearColor Tint = FMath::Lerp(FLinearColor(1.0f, 1.0f, 1.0f), FLinearColor(2.0f, 1.55f, 0.7f), S.Dryness) * FMath::Lerp(1.0f, 0.75f, S.Forest);
+			Tint = Jitter(Tint, WorldGen::HashFloat(HX, HY, 607), 0.15f);
+			Data.Append({ Tint.R, Tint.G, Tint.B });
+		}
+	}
+
+	Component->ClearInstances();
+	if (Transforms.Num() > 0)
+	{
+		Component->AddInstances(Transforms, false, true);
+		for (int32 i = 0; i < Transforms.Num(); ++i)
+		{
+			Component->SetCustomData(i, TArrayView<const float>(&Data[i * 3], 3), false);
+		}
+		Component->MarkRenderStateDirty();
+	}
 }
 
 void ATerrainStreamer::BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32 Step, bool bWithCollision)
 {
-	const int32 N = ChunkResolution / Step;
-	const float Spacing = GridSpacing * Step;
+	if (!Chunk.Mesh)
+	{
+		Chunk.Mesh = AcquireMesh();
+	}
+	BuildSurface(Chunk.Mesh, FVector(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize(), 0.0), ChunkResolution / Step, GridSpacing * Step, bWithCollision);
+	Chunk.Step = Step;
+	Chunk.bHasCollision = bWithCollision;
+}
+
+void ATerrainStreamer::BuildSurface(UProceduralMeshComponent* Mesh, const FVector& Origin, int32 N, float Spacing, bool bWithCollision) const
+{
 	const int32 Side = N + 1;
-	const FVector Origin(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize(), 0.0);
 
 	// Samples with a one-vertex border so normals at chunk edges match the neighbours.
 	const int32 PaddedSide = Side + 2;
@@ -292,7 +586,7 @@ void ATerrainStreamer::BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32
 	for (int32 Y = N; Y > 0; --Y) Perimeter.Add(Y * Side);
 	Perimeter.Add(0);
 
-	const float SkirtDepth = 3000.0f * Step;
+	const float SkirtDepth = 6.0f * Spacing;
 	const int32 SkirtStart = Vertices.Num();
 	for (int32 i = 0; i < NumSkirt; ++i)
 	{
@@ -319,16 +613,10 @@ void ATerrainStreamer::BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32
 		Triangles.Append({ A, A2, B, B, A2, B2, A, B, A2, B, B2, A2 });
 	}
 
-	if (!Chunk.Mesh)
-	{
-		Chunk.Mesh = AcquireMesh();
-	}
-	Chunk.Mesh->SetWorldLocation(Origin);
+	Mesh->SetWorldLocation(Origin);
 	const TArray<FVector2D> Empty;
-	Chunk.Mesh->CreateMeshSection(0, Vertices, Triangles, Normals, UV0, UV1, Empty, Empty, LayerWeights, TArray<FProcMeshTangent>(), bWithCollision);
-	Chunk.Mesh->SetMaterial(0, TerrainMaterial);
-	Chunk.Step = Step;
-	Chunk.bHasCollision = bWithCollision;
+	Mesh->CreateMeshSection(0, Vertices, Triangles, Normals, UV0, UV1, Empty, Empty, LayerWeights, TArray<FProcMeshTangent>(), bWithCollision);
+	Mesh->SetMaterial(0, TerrainMaterial);
 }
 
 void ATerrainStreamer::FPropBatch::Add(EPropPart Part, const FVector& Center, const FRotator& Rotation, const FVector& SizeCm, const FLinearColor& Color, float Glow, ESurface Surface)
@@ -942,7 +1230,16 @@ UHierarchicalInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPa
 		Component->SetMobility(EComponentMobility::Movable);
 		Component->SetStaticMesh(PartMeshes[Part]);
 		Component->SetMaterial(0, PartMaterials[Part]);
-		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		// Trunks, rocks and buildings are solid so you can weave between them; foliage stays soft.
+		if (Part == Bush)
+		{
+			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+		else
+		{
+			Component->SetCollisionProfileName(UCollisionProfile::BlockAll_ProfileName);
+			Component->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		}
 		Component->NumCustomDataFloats = 5;
 		if (Part == Rock || Part == Bush || Part == Trunk)
 		{

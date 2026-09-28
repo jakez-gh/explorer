@@ -36,7 +36,7 @@ void AFlightPawn::BeginPlay()
 	FlightYaw = GetActorRotation().Yaw;
 	FlightPitch = FMath::Clamp(GetActorRotation().Pitch, -MaxPitch, MaxPitch);
 	SetActorRotation(FRotator(0.0f, FlightYaw, 0.0f));
-	CameraComponent->SetFieldOfView(BaseFieldOfView);
+	CameraComponent->SetFieldOfView(FieldOfView);
 }
 
 void AFlightPawn::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -192,21 +192,25 @@ void AFlightPawn::Tick(float DeltaTime)
 	const FVector Forward = FRotator(FlightPitch, FlightYaw, 0.0f).Vector();
 	FVector Velocity = Forward * Speed + FVector::UpVector * Rise * RiseSpeed;
 
-	// Soft cushion above land and water, looking ahead so rising hills lift you before you reach them.
+	// Ground: never push you away, just ease a descent to a stop at a clearance that grows with speed,
+	// so a dive smoothly levels out and you glide along the surface. Looks ahead so rising ground
+	// starts the climb early. Only below the minimum clearance is there a gentle lift.
 	const FVector Location = GetActorLocation();
 	const float Ground = FMath::Max(WorldGen::Height(Location.X, Location.Y), 0.0f);
-	float GroundAhead = Ground;
+	float Floor = Ground;
 	const FVector Horizontal(Velocity.X, Velocity.Y, 0.0f);
-	for (const float Seconds : { 0.5f, 1.0f, 2.0f })
+	for (const float Seconds : { 0.25f, 0.5f, 1.0f })
 	{
 		const FVector Ahead = Location + Horizontal * Seconds;
-		GroundAhead = FMath::Max(GroundAhead, FMath::Max(WorldGen::Height(Ahead.X, Ahead.Y), 0.0f) - 500.0f * Seconds);
+		Floor = FMath::Max(Floor, FMath::Max(WorldGen::Height(Ahead.X, Ahead.Y), 0.0f));
 	}
-	const float Altitude = Location.Z - GroundAhead;
-	if (Altitude < GroundCushion)
+	const float Clearance = MinGroundClearance + Speed * ClearancePerSpeed;
+	const float Room = Location.Z - (Floor + Clearance);
+	const float MaxDescent = FMath::Max(Room, 0.0f) / GroundEaseTime;
+	Velocity.Z = FMath::Max(Velocity.Z, -MaxDescent);
+	if (Room < 0.0f)
 	{
-		const float Push = FMath::Square(1.0f - FMath::Max(Altitude, 0.0f) / GroundCushion);
-		Velocity.Z = FMath::Max(Velocity.Z, Push * 9000.0f);
+		Velocity.Z = FMath::Max(Velocity.Z, FMath::Min(-Room / GroundEaseTime, 3000.0f));
 	}
 
 	// Move, sliding along anything solid.
@@ -217,9 +221,9 @@ void AFlightPawn::Tick(float DeltaTime)
 	{
 		AddActorWorldOffset(FVector::VectorPlaneProject(Delta * (1.0f - Hit.Time), Hit.Normal), true);
 	}
-	if (GetActorLocation().Z < Ground + 300.0f)
+	if (GetActorLocation().Z < Ground + 60.0f)
 	{
-		SetActorLocation(FVector(GetActorLocation().X, GetActorLocation().Y, Ground + 300.0f));
+		SetActorLocation(FVector(GetActorLocation().X, GetActorLocation().Y, Ground + 60.0f));
 	}
 	SetActorRotation(FRotator(0.0f, FlightYaw, 0.0f));
 
@@ -239,9 +243,7 @@ void AFlightPawn::Tick(float DeltaTime)
 	const FQuat Head = FRotator(Look.Y, Look.X, 0.0f).Quaternion();
 	CameraComponent->SetWorldRotation(Body * Head);
 
-	// Widen the view with speed, and let the camera breathe.
-	const float SpeedAlpha = Speed / MaxFlightSpeed;
-	CameraComponent->SetFieldOfView(FMath::FInterpTo(CameraComponent->FieldOfView, BaseFieldOfView + SpeedFieldOfView * SpeedAlpha, DeltaTime, 3.0f));
+	// Let the camera breathe; speed never changes the view.
 	BobTime += DeltaTime;
 	CameraComponent->SetRelativeLocation(FVector(0.0f, 0.0f, FMath::Sin(BobTime * 2.0f * PI / BobPeriod) * BobAmplitude));
 
