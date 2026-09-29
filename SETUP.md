@@ -1,140 +1,104 @@
 # Explorer — Setup Guide
 
-This guide walks through getting Explorer running on your machine.
+Getting Explorer running from a fresh clone.
 
-## System Requirements
+## Prerequisites
 
-- **OS**: Windows 10/11
-- **Disk Space**: ~150GB (UE 5.4 + Visual Studio + project)
-- **RAM**: 16GB minimum (32GB recommended)
-- **GPU**: NVIDIA GTX 1060 or better (for decent performance)
-- **Internet**: High-speed for downloading ~100GB of tools
+- **Windows 10/11**, ~150 GB free disk, 16 GB+ RAM, a GPU that supports DX12/SM6 (for Lumen + Nanite)
+- **Unreal Engine 5.4.4** — install via Epic Games Launcher (Engine tab → Library → Unreal Engine 5.4). Default install
+  location is fine; if you install somewhere other than `C:\Users\<you>\UnrealEngine\UE_5.4`, adjust the paths below.
+  Make sure **Starter Content** is checked in the installer options (or install the "Editor Symbols for debugging"
+  variant that includes Samples) — `Tools/setup_content.ps1` copies it out of the engine install.
+- **Visual Studio 2022 Build Tools** with the "Desktop development with C++" workload (full VS is fine too, but only
+  the command-line build tools are required/tested)
+- **Python 3** on PATH (used by `Tools/fetch_assets.py`, which runs outside the engine)
+- A gamepad is recommended (primary input) but keyboard/mouse works as a fallback
 
-## Step 1: Install Epic Games Launcher
+## 1. Clone and generate project files
 
-1. Go to https://www.epicgames.com/store/download
-2. Click **Download** for Epic Games Launcher
-3. Run `EpicInstaller.exe`
-4. Follow the installer prompts
-5. Sign in with your Epic Games account (create one if needed)
+```
+git clone https://github.com/jakez-gh/explorer.git
+cd explorer
+```
 
-**Time:** ~10 minutes
+Right-click `Explorer.uproject` → **Generate Visual Studio project files** (or just proceed to step 3 — the
+command-line build doesn't need the `.sln`).
 
-## Step 2: Install Unreal Engine 5.4
+## 2. Fetch and import free CC0 assets
 
-1. Open **Epic Games Launcher**
-2. Click **Unreal Engine** in the left sidebar
-3. Click **Library**
-4. Scroll to find **Unreal Engine 5.4** (or click **+** to add it)
-5. Click **Install**
-6. Choose your installation location (default: `C:\Program Files\Epic Games\UE_5.4`)
-7. Click **Install**
-8. Wait for download and installation (~20-30 minutes depending on internet)
+These are not committed (large binaries), so pull them after cloning:
 
-**Total Download:** ~100GB
+```powershell
+# Engine Starter Content (photographed textures, SM_Rock, SM_Bush) — ~600 MB, copied from your engine install
+Tools/setup_content.ps1
 
-## Step 3: Install Visual Studio 2022
+# Poly Haven + ambientCG textures/models (CC0) — downloads into SourceAssets/
+python Tools/fetch_assets.py
 
-Visual Studio is required to compile C++ code.
+# Import SourceAssets/ into the project as .uassets (Nanite enabled), headless
+C:\Users\<you>\UnrealEngine\UE_5.4\Engine\Binaries\Win64\UnrealEditor-Cmd.exe <repo>\Explorer.uproject -run=pythonscript -script=<repo>\Tools\import_assets.py -unattended
 
-1. Go to https://visualstudio.microsoft.com/vs/community/
-2. Click **Download Visual Studio Community**
-3. Run the installer
-4. Click **Continue** past the initial screen
-5. On the **Workloads** tab, check:
-   - ✓ **Desktop development with C++**
-6. Click **Install**
-7. Wait for installation (~30 minutes)
+# Regenerate terrain/prop materials from the imported textures, headless
+C:\Users\<you>\UnrealEngine\UE_5.4\Engine\Binaries\Win64\UnrealEditor-Cmd.exe <repo>\Explorer.uproject -run=pythonscript -script=<repo>\Tools\create_materials.py -unattended -nullrhi
+```
 
-**Why?** Unreal uses Visual Studio to compile your game code.
+### Optional: photoreal trees (Fab/Megascans)
 
-## Step 4: Generate Project Files
+Temperate forests look for `Content/EuropeanBeech` and `Content/NorwayMaple` (Quixel Megascans, free) at runtime and
+fall back to generated trees if they're missing. To add them:
 
-1. Open **Windows File Explorer**
-2. Navigate to your `Explorer` folder
-3. Right-click `Explorer.uproject`
-4. Select **Generate Visual Studio project files**
-5. Wait a few seconds for `Explorer.sln` to be created
+1. Open the project in the Unreal Editor
+2. **Window → Fab** → search "European Beech" and "Norway Maple" → **Add to Project** for each
+3. They land in `Content/EuropeanBeech`, `Content/NorwayMaple`, `Content/MSPresets` — already git-ignored
 
-## Step 5: Build the Project
+This step is skippable; the game runs fine without it, just with simpler tree meshes.
 
-1. Open `Explorer.sln` in Visual Studio
-2. At the top, make sure you're in **Development Editor** mode (dropdown near the Run button)
-3. Press **Ctrl+Shift+B** or go to **Build → Build Solution**
-4. Wait for compilation (5-15 minutes first time, faster after)
-5. When done, you should see "Build succeeded" in the output
+## 3. Build
 
-## Step 6: Open in Unreal Editor
+From a shell with VS 2022 Build Tools on PATH:
 
-### Option A: From Windows Explorer
-1. Right-click `Explorer.uproject`
-2. Select **Open with → Unreal Engine 5.4**
+```
+C:\Users\<you>\UnrealEngine\UE_5.4\Engine\Build\BatchFiles\Build.bat ExplorerEditor Win64 Development -Project=<repo>\Explorer.uproject -WaitMutex
+```
 
-### Option B: From Unreal Launcher
-1. Open **Epic Games Launcher**
-2. Go to **Library**
-3. Click **Create** next to Unreal Engine 5.4
-4. Browse to your `Explorer` folder
-5. Select `Explorer.uproject`
-6. Click **Open**
+(Or open `Explorer.sln` in Visual Studio and Build Solution, Development Editor config — slower to set up but works
+the same.)
 
-**First load will take 5-10 minutes as it compiles shaders.**
+## 4. Run
 
-## Step 7: Test Flight
+```
+C:\Users\<you>\UnrealEngine\UE_5.4\Engine\Binaries\Win64\UnrealEditor.exe <repo>\Explorer.uproject -game -windowed -ResX=1600 -ResY=900
+```
 
-1. In Unreal Editor, the default level should load
-2. If not, create a new level: **File → New Level**
-3. In the **Content Browser** (bottom panel), create a folder called `Maps` if it doesn't exist
-4. **Place Actors** panel (right side) → Search for **SimpleTerrainActor**
-5. Drag it into the level
-6. In the **World Settings** panel (top right), set:
-   - **Game Mode Override** → `ExplorerGameMode`
-7. Plug in your controller
-8. Press **Alt+P** or click the **Play** button
-9. You should be able to fly around!
+The map, game mode, and input are all set in `Config/`, so this just works — no manual level setup, no placing
+actors, no picking a game mode. First launch after any shader/asset change spends several minutes compiling shaders
+and building Nanite data (cached after that).
+
+Useful flags:
+- `-NewGame` — ignore the save and start fresh (otherwise it resumes wherever you last quit)
+- `-StartX=<u> -StartY=<u>` (world units) — start at a specific location; refine with `-StartZ=`, `-StartYaw=`, `-StartPitch=`
+- `-BiomeReport` — logs the nearest biome/village/city/floating island and exits
+- `-FlightDebug` — logs fps/altitude/velocity once a second
+
+Or open `Explorer.uproject` in the Unreal Editor and press Play to iterate.
+
+## Controls
+
+- **Gamepad (primary):** left stick steer (turn + bank, pitch) · right trigger speed (released = hover) ·
+  right stick look · bumpers rise/sink · Start = pause menu
+- **Keyboard/mouse:** WASD steer · Space cruise / Shift full speed · mouse look · E/Q rise/sink · Esc = pause menu ·
+  Alt+Q quit
 
 ## Troubleshooting
 
-### "Can't find Visual Studio"
-- Make sure Visual Studio 2022 is installed with C++ workload
-- Restart your computer after installation
+- **Linker error on a locked DLL** — close the running game and `CrashReportClient.exe` before rebuilding.
+- **UBT fails resolving SwarmInterface/NETFXSDK** — set a user env var `UE_SDKS_ROOT` pointing at a folder containing
+  a placeholder NETFXSDK dir (see `CLAUDE.md`); the real .NET Framework SDK isn't required, this just satisfies UBT's
+  lookup.
+- **Headers fail to compile on newer MSVC** — already worked around in `Source/Explorer/Explorer.Build.cs`
+  (`PLATFORM_HAS_ASAN_INCLUDE=0`, PCHs disabled). If you hit something similar, that file is the place to look.
+- **Missing Starter Content error from `setup_content.ps1`** — reinstall/modify the engine in Epic Games Launcher and
+  make sure Starter Content/Samples is included.
+- **Forests look plain / low-poly trees everywhere** — expected without the optional Fab packs (see above); not a bug.
 
-### "Project failed to compile"
-- Delete the `Intermediate`, `Binaries`, and `Saved` folders
-- Right-click `Explorer.uproject` → **Generate Visual Studio project files**
-- Rebuild in Visual Studio
-
-### "Unreal Editor won't launch"
-- Make sure UE 5.4 is fully installed (check Epic Games Launcher)
-- Delete the `.vs` folder in the Explorer directory
-- Regenerate Visual Studio files and rebuild
-
-### "Flight feels weird or doesn't respond"
-- Make sure your controller is plugged in and detected by Windows
-- In Unreal Editor, go to **Edit → Project Settings → Input**
-- Look for gamepad mappings
-
-### "Can't place terrain"
-- Make sure you're in a valid level (not the default)
-- The **Place Actors** panel is on the right side of the editor
-- Search for "SimpleTerrainActor" in the search box
-
-## Next Steps
-
-Once it's running:
-- Explore the terrain with your controller
-- Adjust flight parameters in the `FlightPawn` Blueprint
-- Experiment with terrain settings in `SimpleTerrainActor`
-- Check out the CLAUDE.md file for development context
-
-## Getting Help
-
-If you get stuck:
-1. Check the output log: **Window → Developer Tools → Output Log**
-2. Read error messages carefully — they often tell you exactly what's wrong
-3. Try the troubleshooting section above
-4. Check Unreal's official docs: https://docs.unrealengine.com
-
----
-
-**You're almost there!** Once UE 5.4 and Visual Studio are installed, the rest is smooth.
+See `CLAUDE.md` for the full architecture and development context.
