@@ -180,6 +180,12 @@ APawn* AExplorerGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPla
 			FRotator Look(-15.0f, 0.0f, 0.0f);
 			FParse::Value(FCommandLine::Get(), TEXT("StartYaw="), Look.Yaw);
 			FParse::Value(FCommandLine::Get(), TEXT("StartPitch="), Look.Pitch);
+			// -StartDist=<cm> backs the camera up along its view direction; -StartSide=<cm> slides it sideways.
+			float Dist = 0.0f, Side = 0.0f;
+			FParse::Value(FCommandLine::Get(), TEXT("StartDist="), Dist);
+			FParse::Value(FCommandLine::Get(), TEXT("StartSide="), Side);
+			Spot -= Look.Vector() * Dist;
+			Spot += FRotator(0.0f, Look.Yaw + 90.0f, 0.0f).Vector() * Side;
 			return SpawnDefaultPawnAtTransform(NewPlayer, FTransform(Look, Spot));
 		}
 	}

@@ -63,6 +63,8 @@ namespace
 	{
 		FHouse& House;
 		ESurface OuterSurface;
+		bool bShutters = true;      // shutters and stone sills on outside windows
+		bool bWhiteFrames = false;  // window and door frames painted white
 
 		void Box(ESurface Surface, const FVector& Min, const FVector& Max)
 		{
@@ -131,6 +133,7 @@ namespace
 					House.DoorwayZ.Add(Z0);
 				}
 				// Frame and glass.
+				const int32 FrameStart = House.Pieces.Num();
 				const float Frame = 8.0f;
 				if (O.bWindow)
 				{
@@ -140,7 +143,7 @@ namespace
 					Slab(ESurface::Wood, B, B + Frame, W.Fixed, W.Thickness + 4.0f, Z0 + O.Bottom, Z0 + O.Top, W.bAlongX);
 					Slab(ESurface::Wood, O.At - 3.0f, O.At + 3.0f, W.Fixed, 6.0f, Z0 + O.Bottom, Z0 + O.Top, W.bAlongX);
 					Slab(ESurface::Glass, A, B, W.Fixed, 2.0f, Z0 + O.Bottom, Z0 + O.Top, W.bAlongX);
-					if (W.bExterior)
+					if (W.bExterior && bShutters)
 					{
 						// Projecting stone sill and shutters flanking the window on the outside face.
 						const float OutSign = W.Fixed >= 0.0f ? 1.0f : -1.0f;
@@ -155,6 +158,13 @@ namespace
 					Slab(ESurface::Wood, A - Frame, A, W.Fixed, W.Thickness + 4.0f, Z0, Z0 + O.Top, W.bAlongX);
 					Slab(ESurface::Wood, B, B + Frame, W.Fixed, W.Thickness + 4.0f, Z0, Z0 + O.Top, W.bAlongX);
 					Slab(ESurface::Wood, A - Frame, B + Frame, W.Fixed, W.Thickness + 4.0f, Z0 + O.Top, Z0 + O.Top + Frame, W.bAlongX);
+				}
+				if (bWhiteFrames)
+				{
+					for (int32 k = FrameStart; k < House.Pieces.Num(); ++k)
+					{
+						if (House.Pieces[k].Surface == ESurface::Wood) { House.Pieces[k].Surface = ESurface::ExteriorWall; House.Pieces[k].bTinted = true; House.Pieces[k].Tint = FLinearColor(2.4f, 2.4f, 2.4f); }
+					}
 				}
 				Cursor = B;
 			}
@@ -669,6 +679,8 @@ FHouse GenerateFamilyHouse1719()
 	House.Width = HX * 2.0f;
 	House.Depth = HY * 2.0f;
 	FBuilder B{ House, ESurface::ExteriorWall };
+	B.bShutters = false;
+	B.bWhiteFrames = true;
 	auto Box = [&](ESurface S, float X0, float Y0, float Z0, float X1, float Y1, float Z1)
 	{
 		B.Box(S, FVector(FMath::Min(X0, X1), FMath::Min(Y0, Y1), Z0), FVector(FMath::Max(X0, X1), FMath::Max(Y0, Y1), Z1));
@@ -1034,10 +1046,10 @@ FHouse GenerateFamilyHouse1719()
 	// Gable-end windows: a pair side by side in the front gable, a small one at the back (drawn just outside the gable siding).
 	for (const float X : { -42.0f, 42.0f })
 	{
-		Box(ESurface::Wood, X - 38.0f, HY + 4.0f, Z1 + 140.0f, X + 38.0f, HY + 16.0f, Z1 + 290.0f);
+		Tinted(ESurface::ExteriorWall, FLinearColor(2.4f, 2.4f, 2.4f), X - 38.0f, HY + 4.0f, Z1 + 140.0f, X + 38.0f, HY + 16.0f, Z1 + 290.0f);
 		Box(ESurface::Glass, X - 30.0f, HY + 14.0f, Z1 + 148.0f, X + 30.0f, HY + 17.0f, Z1 + 282.0f);
 	}
-	Box(ESurface::Wood, -30.0f, -HY - 16.0f, Z1 + 150.0f, 30.0f, -HY - 4.0f, Z1 + 250.0f);
+	Tinted(ESurface::ExteriorWall, FLinearColor(2.4f, 2.4f, 2.4f), -30.0f, -HY - 16.0f, Z1 + 150.0f, 30.0f, -HY - 4.0f, Z1 + 250.0f);
 	Box(ESurface::Glass, -24.0f, -HY - 17.0f, Z1 + 156.0f, 24.0f, -HY - 14.0f, Z1 + 244.0f);
 	// Enclosed front porch across the whole front: siding skirt, banks of windows, a lean-to roof, wooden steps to the yard.
 	{

@@ -2614,6 +2614,7 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 				{
 					// Blue vinyl siding outside, earth-tone paint inside.
 					if (Piece.Surface == HouseGen::ESurface::ExteriorWall) Tint = FLinearColor(0.85f, 0.97f, 1.25f); // light grey-blue vinyl
+					else if (Piece.Surface == HouseGen::ESurface::Stone && Piece.Center.Z < 0.0f) Tint = FLinearColor(0.95f, 0.95f, 0.92f); // cinderblock foundation
 					else if (Piece.Surface == HouseGen::ESurface::Wood && (FMath::Abs(Piece.Center.X) > Plan.Width * 0.5f - 30.0f || FMath::Abs(Piece.Center.Y) > Plan.Depth * 0.5f - 30.0f) && Piece.Center.Z > -10.0f) Tint = FLinearColor(0.4f, 0.22f, 0.13f); // brown trim
 					else if (Piece.Surface == HouseGen::ESurface::InteriorWall) Tint = FLinearColor(1.25f, 1.02f, 0.78f);
 					else if (Piece.Surface == HouseGen::ESurface::SlateRoof || Piece.Surface == HouseGen::ESurface::ClayRoof) Tint = FLinearColor(1.9f, 1.9f, 1.95f); // light grey asphalt shingles
@@ -2625,6 +2626,7 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 					RealHouseLook(Piece, Lot->Seed, Plan.Width * 0.5f, Plan.Depth * 0.5f, Surface, Tint, bLook);
 				}
 				if (Piece.bTinted) Tint = Piece.Tint;
+				if (Lot->bFamilyHouse && Piece.Surface == HouseGen::ESurface::Stone && Piece.Center.Z < 0.0f && !Piece.bTinted) { Surface = HouseGen::ESurface::ExteriorWall; Tint = FLinearColor(1.0f, 1.0f, 1.0f); } // smooth grey foundation
 				Batch.Add(static_cast<EPropPart>(BuildSurf0 + static_cast<int32>(Surface)), Mid, PieceRot, Size, Tint);
 			}
 			// The single tree in the back yard.
