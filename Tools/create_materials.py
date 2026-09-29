@@ -513,13 +513,13 @@ def carpet_noise(size_cm):
     return out
 
 
-# Spots 2.5-7.5 cm across (1-3 inches).
-na = carpet_noise(6.5)
-nb = carpet_noise(4.0)
-nc = carpet_noise(3.0)
-dark = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(na, nc), g.const(0.30)), g.const(14.0)))
-pale = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(nb, g.op(unreal.MaterialExpressionSubtract, g.const(1.0), nc)), g.const(0.26)), g.const(14.0)))
-carpet = g.lerp(g.lerp(g.color(0.13, 0.075, 0.04), g.color(0.030, 0.014, 0.006), dark), g.color(0.36, 0.24, 0.13), pale)
+# Muted, 1980s multi-tone brown: soft-edged blotches roughly 4-10 cm across.
+na = carpet_noise(16.0)
+nb = carpet_noise(10.0)
+nc = carpet_noise(7.5)
+dark = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(na, nc), g.const(0.30)), g.const(6.0)))
+pale = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(nb, g.op(unreal.MaterialExpressionSubtract, g.const(1.0), nc)), g.const(0.26)), g.const(6.0)))
+carpet = g.lerp(g.lerp(g.color(0.16, 0.10, 0.06), g.color(0.075, 0.042, 0.022), dark), g.color(0.25, 0.17, 0.10), pale)
 # Fibre detail from the ambientCG Carpet016 scan (Tools/import_carpet.py), tinted by the spot colours above.
 fibre_d = unreal.load_asset("/Game/PolyHaven/Textures/carpet_016/carpet_016_diff")
 fibre_n = unreal.load_asset("/Game/PolyHaven/Textures/carpet_016/carpet_016_nor")
