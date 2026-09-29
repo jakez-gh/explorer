@@ -26,3 +26,9 @@ Update: the family lived at 1719 Avenue E (address since changed), so the hero h
 
 ## 1719 Avenue E as remembered (replaces the 1920 bungalow guess)
 Two storeys, blue vinyl siding, brown trim, concrete front steps, enclosed front porch, blue-and-brown garage with an asphalt pad, chain-link fence, one tree in the back, full cinderblock basement with black-and-orange tile and a bar, earth-tone interior, 220 V window AC in the living room. Family: couple, two elementary boys, a young girl, a teen girl, a baby boy, one cat. Built by `HouseGen::GenerateFamilyHouse1719` (layout is a plausible plan, not a survey).
+
+## Revised 1719 Avenue E (from the family's memory)
+Story-and-a-half, blue vinyl siding, brown trim. Ground floor: central hall with the stairs in the middle of the house; master bedroom, baby's room (the former den), kitchen with pantry and a whole bath beside it, living/dining at the front, enclosed front porch. Upstairs: boys' room open to the landing; the girl's room in the dormer. Basement (cinderblock, black-and-orange tile, bar): the teen's bedroom and the laundry; no workbench. Detached blue/brown garage, asphalt pad, chain-link fence, one back-yard tree, 220 V window AC in the living room.
+
+## 343 East Graham Avenue
+Public records: built 1920, ~1,539 sq ft, 2 bed / 3 bath, roof permit Dec 2024. Landmark `-StartAt="343 East Graham"` is placed on the mapped Graham Avenue East (unverified). No detailed model yet: needs the player's description or photos.

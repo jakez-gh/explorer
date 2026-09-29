@@ -501,6 +501,8 @@ namespace RealPlace
 
 		// Places that matter to the player but that OSM doesn't name. 1733 Avenue E: Avenue E runs east-west about
 		// 770 m north of Bayliss Park; 17th Street crosses it 1.45 km west and 18th Street 125 m further on.
+		// 343 East Graham Avenue (built 1920, 1,539 sq ft, per public records): placed on the mapped Graham Avenue East; verify.
+		Place.Landmarks.Add({ TEXT("343 East Graham"), ToWorld(1044.0, -215.0) });
 		Place.Landmarks.Add({ TEXT("8th and Broadway"), ToWorld(-40.0, 250.0) });
 		Place.Landmarks.Add({ TEXT("18th and E"), ToWorld(-1580.0, 770.0) });
 
