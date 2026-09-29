@@ -1078,13 +1078,13 @@ FHouse GenerateFamilyHouse1719()
 	{
 		const FLinearColor Pine(1.7f, 1.35f, 0.8f);
 		Tinted(ESurface::Wood, Pine, -310.0f, -HY - 90.0f, -14.0f, -190.0f, -HY, 0.0f);            // platform at the door
-		Tinted(ESurface::Wood, Pine, -190.0f, -HY - 170.0f, -14.0f, 110.0f, -HY, 0.0f);            // the deck, level with the platform
+		Tinted(ESurface::Wood, Pine, -190.0f, -HY - 170.0f, -14.0f, 150.0f, -HY, 0.0f);            // the deck (3.4 m x 1.7 m as before), level with the platform
 		for (int32 k = 0; k < 5; ++k)
 		{
 			Tinted(ESurface::Wood, Pine, -310.0f, -HY - 90.0f - (k + 1) * 26.0f, -110.0f, -190.0f, -HY - 90.0f - k * 26.0f, -110.0f + (5 - k) * 18.0f + 18.0f);
 		}
-		Tinted(ESurface::Wood, Pine, -190.0f, -HY - 176.0f, 0.0f, 110.0f, -HY - 170.0f, 95.0f);    // deck rail, outer edge
-		Tinted(ESurface::Wood, Pine, 104.0f, -HY - 170.0f, 0.0f, 110.0f, -HY, 95.0f);              // deck rail, east end
+		Tinted(ESurface::Wood, Pine, -190.0f, -HY - 176.0f, 0.0f, 150.0f, -HY - 170.0f, 95.0f);    // deck rail, outer edge
+		Tinted(ESurface::Wood, Pine, 144.0f, -HY - 170.0f, 0.0f, 150.0f, -HY, 95.0f);              // deck rail, east end
 	}
 
 	// Interior walls were each a solid colour or wood panelling, never patterned: light blue everywhere upstairs; downstairs
