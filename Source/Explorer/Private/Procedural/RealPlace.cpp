@@ -346,6 +346,12 @@ namespace RealPlace
 			}
 		}
 
+		// Places that matter to the player but that OSM doesn't name. 1733 Avenue E: Avenue E runs east-west about
+		// 770 m north of Bayliss Park; 17th Street crosses it 1.45 km west and 18th Street 125 m further on.
+		Place.Landmarks.Add({ TEXT("1733 Avenue E"), ToWorld(-1497.0, 760.0) });
+		Place.Landmarks.Add({ TEXT("8th and Broadway"), ToWorld(-40.0, 250.0) });
+		Place.Landmarks.Add({ TEXT("18th and E"), ToWorld(-1580.0, 770.0) });
+
 		Place.bLoaded = true;
 		bReady.store(true);
 		UE_LOG(LogTemp, Display, TEXT("RealPlace: Council Bluffs loaded: %d road segments, %d buildings, %d landmarks; origin X=%.0f Y=%.0f"),

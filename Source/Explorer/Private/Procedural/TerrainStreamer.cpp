@@ -1478,11 +1478,16 @@ void ATerrainStreamer::FPropBatch::Add(EPropPart Part, const FVector& Center, co
 void ATerrainStreamer::ComputeProps(const FIntPoint& Coord, EProps Level, FJobResult& Out) const
 {
 	FPropBatch Batch;
-	AddCities(Coord, Batch);
-	AddLighthouses(Coord, Batch);
-	AddVolcanoGlow(Coord, Batch);
-	AddFloatingIslands(Coord, Batch);
-	AddDiscoveries(Coord, Batch);
+	// Council Bluffs is a real place: no generated cities, islands or landmarks over it.
+	const FVector2D ChunkMin2(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize());
+	if (!RealPlace::Covers(ChunkMin2, ChunkMin2 + FVector2D(ChunkWorldSize()), 250000.0))
+	{
+		AddCities(Coord, Batch);
+		AddLighthouses(Coord, Batch);
+		AddVolcanoGlow(Coord, Batch);
+		AddFloatingIslands(Coord, Batch);
+		AddDiscoveries(Coord, Batch);
+	}
 	AddRealBuildings(Coord, Batch, Level);
 	if (Level == EProps::Trees)
 	{
@@ -1491,8 +1496,11 @@ void ATerrainStreamer::ComputeProps(const FIntPoint& Coord, EProps Level, FJobRe
 	if (Level == EProps::Full)
 	{
 		AddVegetation(Coord, Batch, false);
-		AddVillages(Coord, Batch);
-		AddStoneCircles(Coord, Batch);
+		if (!RealPlace::Covers(ChunkMin2, ChunkMin2 + FVector2D(ChunkWorldSize()), 250000.0))
+		{
+			AddVillages(Coord, Batch);
+			AddStoneCircles(Coord, Batch);
+		}
 	}
 
 	for (int32 Part = 0; Part < NumParts; ++Part)

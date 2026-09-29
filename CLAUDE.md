@@ -35,6 +35,11 @@
 - `Game/ExplorerGameMode` — resumes from `UExplorerSaveGame` (or `-StartX`/`-NewGame`), spawns terrain, strips the template sky sphere/floor, sets up natural lighting/fog/post.
 - `Game/ExplorerPlayerController` — Escape/Start toggles a Slate pause menu (Resume/Quit); Alt+Q quits.
 
+## Real place: Council Bluffs, Iowa
+- `Procedural/RealPlace` loads `Data/CouncilBluffs.json` (OSM + DEM, baked by `Tools/fetch_council_bluffs.py`) and overrides `WorldGen::Sample`/`PathsNear` around world (X=2,500,000, Y=1,500,000): real terrain, lakes, woods, streets; `TerrainStreamer::AddRealBuildings` builds every mapped building from its footprint with `HouseGen` (furnished interiors near, solid blocks far). See `docs/COUNCIL_BLUFFS.md`.
+- `-CouncilBluffs` / `-StartAt="<landmark substring>"` (e.g. "Big Lake Park", "Thomas Jefferson", "1733 Avenue E") start over it. `-NoRoof` debug flag removes house roofs.
+- Also new: `HouseGen::GenerateChurch`, discoveries (ruins, obelisks, World Tree, sky gates, wind farms), furniture registry sync-scan fix.
+
 ## Controls
 - **Gamepad (primary):** left stick steer (X turn + bank, Y pitch) · right trigger speed (0 = hover … full = very fast) · right stick look · bumpers rise/sink · Start menu
 - **Keyboard/mouse (fallback):** WASD steer · Space cruise / Shift full speed · mouse look · E/Q rise/sink · Esc menu · Alt+Q quit

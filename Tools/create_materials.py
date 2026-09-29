@@ -329,7 +329,7 @@ rough_edge_xy, _, _ = g.world_uvs(140.0)
 ragged = g.mask(g.sample(tex("T_Perlin_Noise_M"), rough_edge_xy), r=True)
 keep = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(edge, g.const(3.0)), g.mul(ragged, g.const(1.2))), g.const(3.0)))
 gravel = g.sample(tex("T_Ground_Gravel_D"), path_xy)
-road = g.mul(gravel, g.color(0.62, 0.56, 0.47))
+road = g.mul(gravel, g.color(0.17, 0.17, 0.18))  # asphalt
 trail = g.mul(gravel, g.color(0.33, 0.24, 0.16))
 color = g.lerp(trail, road, vc, "R")
 # Wheel ruts / foot-worn centre slightly darker and smoother.
