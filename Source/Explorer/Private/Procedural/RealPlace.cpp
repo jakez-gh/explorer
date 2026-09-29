@@ -29,6 +29,14 @@ namespace
 		float Width;
 		bool bRoad;
 		uint32 Seed;
+		int32 Way = -1;
+	};
+
+	struct FWay
+	{
+		FString Name;
+		TArray<FVector2D> Pts;
+		float Width;
 	};
 
 	struct FData
@@ -41,6 +49,9 @@ namespace
 		TArray<FSegment> Segments;
 		TMap<FIntPoint, TArray<int32>> RoadGrid;
 		TArray<RealPlace::FBuilding> Buildings;
+		TArray<FWay> Ways;
+		TArray<RealPlace::FLot> Lots;
+		TMap<FIntPoint, TArray<int32>> LotGrid;
 		TMap<FIntPoint, TArray<int32>> BuildingGrid;
 		int32 RasterW = 0, RasterH = 0;
 		TArray<uint8> Raster;
@@ -318,6 +329,7 @@ namespace RealPlace
 			}
 			TArray<FVector2D> Pts;
 			ReadPoints(O, TEXT("p"), Pts);
+			const int32 WayIndex = Place.Ways.Add({ O->GetStringField(TEXT("n")), Pts, Width });
 			for (int32 i = 0; i + 1 < Pts.Num(); ++i)
 			{
 				if (FVector2D::DistSquared(Pts[i], Pts[i + 1]) < 100.0)
@@ -325,6 +337,7 @@ namespace RealPlace
 					continue;
 				}
 				const int32 Index = Place.Segments.Add({ Pts[i], Pts[i + 1], Width, bRoad, static_cast<uint32>(Place.Segments.Num()) });
+				Place.Segments[Index].Way = WayIndex;
 				const FVector2D Lo(FMath::Min(Pts[i].X, Pts[i + 1].X), FMath::Min(Pts[i].Y, Pts[i + 1].Y));
 				const FVector2D Hi(FMath::Max(Pts[i].X, Pts[i + 1].X), FMath::Max(Pts[i].Y, Pts[i + 1].Y));
 				for (int32 BY = FMath::FloorToInt(Lo.Y / RoadBucket); BY <= FMath::FloorToInt(Hi.Y / RoadBucket); ++BY)
@@ -335,6 +348,124 @@ namespace RealPlace
 					}
 				}
 			}
+		}
+
+		// Fill neighbourhoods: a house lot every ~15 m on both sides of residential streets, wherever the
+		// map shows residential land with no building and no other street close by.
+		{
+			TArray<FVector2D> AveE; // lots along Avenue E, for locating 1733
+			for (int32 WayIndex = 0; WayIndex < Place.Ways.Num(); ++WayIndex)
+			{
+				const FWay& Way = Place.Ways[WayIndex];
+				if (!(FMath::IsNearlyEqual(Way.Width, 700.0f) || FMath::IsNearlyEqual(Way.Width, 850.0f)))
+				{
+					continue;
+				}
+				double Carry = 0.0;
+				for (int32 i = 0; i + 1 < Way.Pts.Num(); ++i)
+				{
+					const FVector2D A = Way.Pts[i], B = Way.Pts[i + 1];
+					const double Len = FVector2D::Distance(A, B);
+					if (Len < 1.0)
+					{
+						continue;
+					}
+					const FVector2D T = (B - A) / Len;
+					for (double S = Carry; S < Len; S += 1500.0)
+					{
+						const FVector2D P = A + T * S;
+						for (const int32 Side : { -1, 1 })
+						{
+							const FVector2D N = FVector2D(-T.Y, T.X) * Side;
+							const uint32 Seed = static_cast<uint32>(FMath::RoundToInt(P.X / 50.0) * 73856093) ^ static_cast<uint32>(FMath::RoundToInt(P.Y / 50.0) * 19349663) ^ static_cast<uint32>(Side + 3);
+							const float RW = 900.0f + (Seed % 300), RD = 800.0f + ((Seed >> 8) % 200);
+							const FVector2D C = P + N * (Way.Width * 0.5 + 300.0 + RD * 0.5 + 900.0);
+							// Corners must sit on residential land, clear of buildings and water.
+							bool bOk = true;
+							for (const FVector2D& Off : { FVector2D(0, 0), FVector2D(RW * 0.5, RD * 0.5), FVector2D(-RW * 0.5, RD * 0.5), FVector2D(RW * 0.5, -RD * 0.5), FVector2D(-RW * 0.5, -RD * 0.5) })
+							{
+								const FVector2D Q = C + T * Off.X + N * Off.Y;
+								const int32 RX = FMath::FloorToInt((Q.X - Place.Min.X) / RasterCell), RY = FMath::FloorToInt((Q.Y - Place.Min.Y) / RasterCell);
+								if (RX < 0 || RY < 0 || RX >= Place.RasterH || RY >= Place.RasterW)
+								{
+									bOk = false;
+									break;
+								}
+								const uint8 Cell = Place.Raster[RX * Place.RasterW + RY];
+								if (((Cell & CoverMask) != CoverResidential && (Cell & CoverMask) != CoverField) || (Cell & CoverBuilding))
+								{
+									bOk = false;
+									break;
+								}
+							}
+							if (!bOk)
+							{
+								continue;
+							}
+							// No other street nearby (own street excepted), and no lot already here.
+							for (int32 BY = FMath::FloorToInt((C.Y - 2500.0) / RoadBucket); bOk && BY <= FMath::FloorToInt((C.Y + 2500.0) / RoadBucket); ++BY)
+							{
+								for (int32 BX = FMath::FloorToInt((C.X - 2500.0) / RoadBucket); bOk && BX <= FMath::FloorToInt((C.X + 2500.0) / RoadBucket); ++BX)
+								{
+									const TArray<int32>* Bucket = Place.RoadGrid.Find(FIntPoint(BX, BY));
+									for (int32 k = 0; Bucket && bOk && k < Bucket->Num(); ++k)
+									{
+										const FSegment& Seg = Place.Segments[(*Bucket)[k]];
+										if (Seg.Way == WayIndex)
+										{
+											continue;
+										}
+										const FVector2D AB = Seg.B - Seg.A;
+										const double U = FMath::Clamp(FVector2D::DotProduct(C - Seg.A, AB) / FMath::Max(AB.SizeSquared(), 1.0), 0.0, 1.0);
+										bOk = FVector2D::Distance(C, Seg.A + AB * U) > Seg.Width * 0.5 + FMath::Max(RW, RD) * 0.5 + 300.0;
+									}
+								}
+							}
+							for (int32 BY = FMath::FloorToInt((C.Y - 1200.0) / RoadBucket); bOk && BY <= FMath::FloorToInt((C.Y + 1200.0) / RoadBucket); ++BY)
+							{
+								for (int32 BX = FMath::FloorToInt((C.X - 1200.0) / RoadBucket); bOk && BX <= FMath::FloorToInt((C.X + 1200.0) / RoadBucket); ++BX)
+								{
+									const TArray<int32>* Bucket = Place.LotGrid.Find(FIntPoint(BX, BY));
+									for (int32 k = 0; Bucket && bOk && k < Bucket->Num(); ++k)
+									{
+										bOk = FVector2D::Distance(C, Place.Lots[(*Bucket)[k]].Pos) > 1150.0;
+									}
+								}
+							}
+							if (!bOk)
+							{
+								continue;
+							}
+							// The front (+Y in the house's frame) faces the street: (-sin yaw, cos yaw) = -N.
+							RealPlace::FLot Lot;
+							Lot.Pos = C;
+							Lot.Yaw = FMath::RadiansToDegrees(FMath::Atan2(N.X, -N.Y));
+							Lot.Width = RW;
+							Lot.Depth = RD;
+							Lot.Seed = Seed;
+							const int32 LotIndex = Place.Lots.Add(Lot);
+							Place.LotGrid.FindOrAdd(FIntPoint(FMath::FloorToInt(C.X / RoadBucket), FMath::FloorToInt(C.Y / RoadBucket))).Add(LotIndex);
+							if (Way.Name == TEXT("Avenue E") && Side == -1)
+							{
+								AveE.Add(C);
+							}
+						}
+					}
+					Carry = FMath::Fmod(Carry + 1500.0 - Len, 1500.0);
+					if (Carry < 0.0) Carry += 1500.0;
+				}
+			}
+			// 1733 Avenue E: 17th Street is 1,456 m west of Bayliss Park, 18th 124 m further west; house
+			// numbers rise westward, so 1733 is the 17th odd-numbered lot after 17th Street.
+			const double East17 = ToWorld(-1456.0, 0.0).Y, East18 = ToWorld(-1580.0, 0.0).Y;
+			TArray<FVector2D> Block;
+			for (const FVector2D& L : AveE)
+			{
+				if (L.Y <= East17 && L.Y >= East18) Block.Add(L);
+			}
+			Block.Sort([](const FVector2D& A, const FVector2D& B) { return A.Y > B.Y; });
+			UE_LOG(LogTemp, Display, TEXT("RealPlace: %d house lots; %d on Avenue E between 17th and 18th"), Place.Lots.Num(), Block.Num());
+			Place.Landmarks.Add({ TEXT("1733 Avenue E"), Block.Num() > 0 ? Block[FMath::Min(16, Block.Num() - 1)] : ToWorld(-1497.0, 745.0) });
 		}
 		for (const TSharedPtr<FJsonValue>& V : Root->GetArrayField(TEXT("places")))
 		{
@@ -348,7 +479,6 @@ namespace RealPlace
 
 		// Places that matter to the player but that OSM doesn't name. 1733 Avenue E: Avenue E runs east-west about
 		// 770 m north of Bayliss Park; 17th Street crosses it 1.45 km west and 18th Street 125 m further on.
-		Place.Landmarks.Add({ TEXT("1733 Avenue E"), ToWorld(-1497.0, 760.0) });
 		Place.Landmarks.Add({ TEXT("8th and Broadway"), ToWorld(-40.0, 250.0) });
 		Place.Landmarks.Add({ TEXT("18th and E"), ToWorld(-1580.0, 770.0) });
 
@@ -513,6 +643,31 @@ namespace RealPlace
 			}
 		}
 		return bFound;
+	}
+
+	void LotsIn(const FVector2D& Min, const FVector2D& Max, TArray<const FLot*>& Out)
+	{
+		if (!bReady.load())
+		{
+			return;
+		}
+		for (int32 BY = FMath::FloorToInt(Min.Y / RoadBucket); BY <= FMath::FloorToInt(Max.Y / RoadBucket); ++BY)
+		{
+			for (int32 BX = FMath::FloorToInt(Min.X / RoadBucket); BX <= FMath::FloorToInt(Max.X / RoadBucket); ++BX)
+			{
+				if (const TArray<int32>* Bucket = Place.LotGrid.Find(FIntPoint(BX, BY)))
+				{
+					for (const int32 Index : *Bucket)
+					{
+						const FLot& L = Place.Lots[Index];
+						if (L.Pos.X >= Min.X && L.Pos.X < Max.X && L.Pos.Y >= Min.Y && L.Pos.Y < Max.Y)
+						{
+							Out.Add(&L);
+						}
+					}
+				}
+			}
+		}
 	}
 
 	void BuildingsIn(const FVector2D& Min, const FVector2D& Max, TArray<const FBuilding*>& Out)

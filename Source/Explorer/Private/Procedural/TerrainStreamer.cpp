@@ -2446,6 +2446,59 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 			Batch.Add(Cube, Base + Quat.RotateVector(FVector(0, 0, Height + 40.0f)), FRotator(0.0f, Yaw, 0.0f), FVector(W + 60.0f, D + 60.0f, 120.0f), FLinearColor(0.35f, 0.32f, 0.3f), 0.0f, SurfSlate);
 		}
 	}
+
+	// Infill houses on residential lots the map doesn't show.
+	TArray<const RealPlace::FLot*> Lots;
+	RealPlace::LotsIn(Min, Max, Lots);
+	for (const RealPlace::FLot* Lot : Lots)
+	{
+		const float Ground = WorldGen::Height(Lot->Pos.X, Lot->Pos.Y);
+		if (Ground < 100.0f)
+		{
+			continue;
+		}
+		const float W = Lot->Width, D = Lot->Depth;
+		float High = Ground;
+		for (const FVector2D Corner : { FVector2D(-1, -1), FVector2D(1, -1), FVector2D(-1, 1), FVector2D(1, 1) })
+		{
+			const FVector C = FVector(Lot->Pos.X, Lot->Pos.Y, 0.0) + FRotator(0.0f, Lot->Yaw, 0.0f).RotateVector(FVector(Corner.X * W * 0.5f, Corner.Y * D * 0.5f, 0.0f));
+			High = FMath::Max(High, WorldGen::Height(C.X, C.Y));
+		}
+		const int32 Floors = (Lot->Seed % 10) < 4 ? 2 : 1;
+		const HouseGen::EStyle Style = (Lot->Seed & 3) == 0 ? HouseGen::EStyle::Brick : HouseGen::EStyle::Plaster;
+		const FQuat Quat = FRotator(0.0f, Lot->Yaw, 0.0f).Quaternion();
+		const FVector Base(Lot->Pos.X, Lot->Pos.Y, High + 40.0f);
+		const FLinearColor Wash = Washes[Lot->Seed % UE_ARRAY_COUNT(Washes)];
+		if (Level == EProps::Full)
+		{
+			const HouseGen::FHouse Plan = HouseGen::Generate(Lot->Seed, Style, Floors > 1, W, D, false, Floors);
+			for (const HouseGen::FPiece& Piece : Plan.Pieces)
+			{
+				const FVector World = Base + Quat.RotateVector(Piece.Center);
+				const FRotator PieceRot = (Quat * Piece.Rotation.Quaternion()).Rotator();
+				if (Piece.bFurniture)
+				{
+					Batch.Add(static_cast<EPropPart>(Furniture0 + static_cast<int32>(Piece.Furniture)), World, PieceRot, FVector::OneVector, White);
+					continue;
+				}
+				FVector Size = Piece.Size;
+				FVector Mid = World;
+				if (Piece.Surface == HouseGen::ESurface::Stone && Piece.Center.Z < 0.0f)
+				{
+					const float Extra = High - Ground + 150.0f;
+					Size.Z += Extra;
+					Mid.Z -= Extra * 0.5f;
+				}
+				Batch.Add(static_cast<EPropPart>(BuildSurf0 + static_cast<int32>(Piece.Surface)), Mid, PieceRot, Size, Piece.Surface == HouseGen::ESurface::ExteriorWall ? Wash : White);
+			}
+		}
+		else
+		{
+			const float Height = Floors * 290.0f + 120.0f;
+			Batch.Add(Cube, Base + Quat.RotateVector(FVector(0, 0, Height * 0.5f - 60.0f)), FRotator(0.0f, Lot->Yaw, 0.0f), FVector(W, D, Height + 60.0f + (High - Ground)), Wash, 0.0f, SurfConcrete);
+			Batch.Add(Cube, Base + Quat.RotateVector(FVector(0, 0, Height + 40.0f)), FRotator(0.0f, Lot->Yaw, 0.0f), FVector(W + 60.0f, D + 60.0f, 120.0f), FLinearColor(0.35f, 0.32f, 0.3f), 0.0f, SurfSlate);
+		}
+	}
 }
 
 void ATerrainStreamer::AddCities(const FIntPoint& Coord, FPropBatch& Batch) const

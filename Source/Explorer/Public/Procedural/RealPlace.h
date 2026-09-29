@@ -38,6 +38,10 @@ namespace RealPlace
 	// Nearest mapped road to P: its closest point (world) and width; false if none within MaxDist.
 	bool NearestRoad(const FVector2D& P, double MaxDist, FVector2D& OutPoint, float& OutWidth);
 
+	// House lots along residential streets where the map has no building: fills in the neighbourhoods.
+	struct FLot { FVector2D Pos; float Yaw; float Width; float Depth; uint32 Seed; };
+	void LotsIn(const FVector2D& Min, const FVector2D& Max, TArray<const FLot*>& Out);
+
 	// Named landmarks (schools, parks...) in world units, for reports and starting positions.
 	struct FLandmark { FString Name; FVector2D Pos; };
 	const TArray<FLandmark>& Landmarks();

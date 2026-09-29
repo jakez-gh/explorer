@@ -171,6 +171,11 @@ APawn* AExplorerGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPla
 		if (RealPlace::Load() && RealPlace::FindLandmark(StartAt, At))
 		{
 			FVector Spot(At.X, At.Y, WorldGen::Height(At.X, At.Y) + 6000.0f);
+			float Alt = 6000.0f;
+			if (FParse::Value(FCommandLine::Get(), TEXT("StartAlt="), Alt))
+			{
+				Spot.Z = WorldGen::Height(At.X, At.Y) + Alt;
+			}
 			FParse::Value(FCommandLine::Get(), TEXT("StartZ="), Spot.Z);
 			FRotator Look(-15.0f, 0.0f, 0.0f);
 			FParse::Value(FCommandLine::Get(), TEXT("StartYaw="), Look.Yaw);
