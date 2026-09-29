@@ -1,6 +1,8 @@
 #include "Flight/FlightPawn.h"
 #include "Game/ExplorerSaveGame.h"
 #include "Procedural/WorldGen.h"
+#include "Procedural/TerrainStreamer.h"
+#include "EngineUtils.h"
 #include "Camera/CameraComponent.h"
 #include "Components/SphereComponent.h"
 #include "Engine/CollisionProfile.h"
@@ -22,7 +24,7 @@ AFlightPawn::AFlightPawn()
 	bUseControllerRotationRoll = false;
 
 	CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("Collision"));
-	CollisionComponent->InitSphereRadius(50.0f);
+	CollisionComponent->InitSphereRadius(30.0f);
 	CollisionComponent->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
 	RootComponent = CollisionComponent;
 
@@ -182,12 +184,32 @@ void AFlightPawn::Tick(float DeltaTime)
 	Steer.Y = FMath::Clamp(bInvertPitch ? -Steer.Y : Steer.Y, -1.0f, 1.0f);
 
 	// Heading: the stick turns; bank into the turn in proportion to the stick, level out when released.
-	FlightYaw = FRotator::NormalizeAxis(FlightYaw + Steer.X * TurnRate * DeltaTime);
+	// Turning is gentler at speed, so the view never swings faster than the world can fill in.
+	const float TurnScale = FMath::Lerp(1.0f, 0.45f, FMath::Clamp(Speed / MaxFlightSpeed, 0.0f, 1.0f));
+	FlightYaw = FRotator::NormalizeAxis(FlightYaw + Steer.X * TurnRate * TurnScale * DeltaTime);
 	Bank = FMath::FInterpTo(Bank, Steer.X * MaxBankAngle, DeltaTime, BankResponse);
 
 	// Speed follows the trigger directly: released means stop and hover. Travel is level; height is
 	// handled by the altitude hold below.
-	Speed = MaxFlightSpeed * FMath::Pow(Throttle, ThrottleCurve);
+	// Top speed rises with height: near the trees the world is dense and slow to stream, higher up you
+	// can go flat out. The trigger always spans zero to the current top speed.
+	{
+		const float GroundHere = FMath::Max(WorldGen::Height(GetActorLocation().X, GetActorLocation().Y), 0.0f);
+		const float AltitudeFactor = FMath::Clamp((GetActorLocation().Z - GroundHere - LowSpeedAltitude) / (FullSpeedAltitude - LowSpeedAltitude), 0.0f, 1.0f);
+		const float Cap = FMath::Lerp(LowAltitudeMaxSpeed, MaxFlightSpeed, FMath::SmoothStep(0.0f, 1.0f, AltitudeFactor));
+		// If the world is falling behind right around us, ease off until it catches up.
+		if (!Streamer.IsValid())
+		{
+			for (TActorIterator<ATerrainStreamer> It(GetWorld()); It; ++It)
+			{
+				Streamer = *It;
+			}
+		}
+		const float Backlog = Streamer.IsValid() ? Streamer->GetStreamingBacklog() : 0.0f;
+		const float Limited = Cap * FMath::Lerp(1.0f, 0.35f, FMath::SmoothStep(0.25f, 1.0f, Backlog));
+		SpeedCap = FMath::FInterpTo(SpeedCap <= 0.0f ? Limited : SpeedCap, Limited, DeltaTime, 1.5f);
+	}
+	Speed = SpeedCap * FMath::Pow(Throttle, ThrottleCurve);
 
 	// Pushing through a tree's crown: the nearer the trunk (and the lower, among the branches), the more
 	// the leaves and branches hold you back.

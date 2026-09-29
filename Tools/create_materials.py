@@ -129,8 +129,14 @@ def finish(mat):
 
 
 # ---------------------------------------------------------------------------------------------
-# Terrain. Vertex colour carries layer weights: R sand, G rock, B snow, A forest floor.
-# UV1 carries (dryness, wetness). Grass is the base layer.
+# Terrain, from photoscanned CC0 surfaces (Poly Haven / ambientCG, see Tools/fetch_assets.py).
+# Vertex colour carries layer weights: R sand, G rock, B snow, A forest floor. UV1 = (dryness, wetness).
+# Near: full-resolution scans with anti-tiling. Far: each layer fades to its average colour, and forest
+# floor far away takes the colour of the canopy above it, so distant woods read as woods.
+def ph(asset, kind):
+    return unreal.load_asset(f"/Game/PolyHaven/Textures/{asset}/{asset}_{kind}")
+
+
 m = new_material("M_Terrain")
 g = Graph(m)
 vc = g.node(unreal.MaterialExpressionVertexColor)
@@ -138,76 +144,77 @@ uv1 = g.node(unreal.MaterialExpressionTextureCoordinate, coordinate_index=1)
 dryness = g.mask(uv1, r=True)
 wetness = g.mask(uv1, g=True)
 weights = g.normal_weights()
+depth = g.node(unreal.MaterialExpressionPixelDepth)
+near_fade = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, depth, g.const(4000.0)), g.const(1.0 / 30000.0)))
+far_fade = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, depth, g.const(150000.0)), g.const(1.0 / 250000.0)))
 
-near_xy, _, _ = g.world_uvs(350.0)
-far_xy, _, _ = g.world_uvs(1900.0)
 macro_xy, _, _ = g.world_uvs(9000.0)
-macro = g.mask(g.sample(tex("T_MacroVariation"), macro_xy), r=True)
-macro_scale = g.lerp(g.const(0.72), g.const(1.18), macro)
-
-# Anti-tiling: a second sample with swapped axes (so its pattern runs a different way) at an unrelated scale,
-# blended by large-scale noise, then faded to a flat, macro-varied colour with distance so no repeat shows.
-wp = g.node(unreal.MaterialExpressionWorldPosition)
-swapped = g.op(unreal.MaterialExpressionAppendVector, g.mask(wp, g=True), g.mask(wp, r=True))
-swapped_xy = g.mul(swapped, g.const(1.0 / 530.0))
+macro_xy2, _, _ = g.world_uvs(31000.0)
+macro = g.mul(g.mask(g.sample(tex("T_MacroVariation"), macro_xy), r=True), g.mask(g.sample(tex("T_MacroVariation"), macro_xy2), g=True))
+macro_scale = g.lerp(g.const(0.7), g.const(1.25), g.saturate(g.mul(macro, g.const(1.6))))
 noise_xy, _, _ = g.world_uvs(4700.0)
 blend = g.mask(g.sample(tex("T_Perlin_Noise_M"), noise_xy), r=True)
-grass = g.lerp(g.sample(tex("T_Ground_Grass_D"), near_xy), g.sample(tex("T_Ground_Grass_D"), swapped_xy), blend)
-grass = g.lerp(grass, g.sample(tex("T_Ground_Grass_D"), far_xy), g.const(0.3))
-# Tone the bright, fuzzy texture down to a natural meadow floor, and let patches of bare soil show
-# through (the 3D blades on top carry the look of grass up close).
-# Deep, slightly blue-green meadow tone: the photo is bright and yellow on its own.
-grass = g.mul(grass, g.color(0.5, 0.66, 0.4))
-soil_xy, _, _ = g.world_uvs(380.0)
-# Soil and litter use only the gravel texture's brightness pattern (its own colour is orange).
-soil = g.mul(g.mask(g.sample(tex("T_Ground_Gravel_D"), soil_xy), g=True), g.color(0.2, 0.16, 0.11))
 patch_xy, _, _ = g.world_uvs(1300.0)
 patches = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mask(g.sample(tex("T_Perlin_Noise_M"), patch_xy), r=True), g.const(0.45)), g.const(2.5)))
-grass = g.lerp(grass, soil, g.mul(patches, g.const(0.3)))
-depth = g.node(unreal.MaterialExpressionPixelDepth)
-fade = g.saturate(g.mul(depth, g.const(1.0 / 25000.0)))
-grass = g.lerp(grass, g.color(0.05, 0.075, 0.03), g.mul(fade, g.const(0.85)))
-dry_grass = g.mul(grass, g.color(1.25, 1.08, 0.68))
-color = g.lerp(grass, dry_grass, g.mul(dryness, g.const(0.7)))
+wp = g.node(unreal.MaterialExpressionWorldPosition)
 
-# Forest floor: brown leaf litter and earth with only a little moss.
-moss_xy, _, _ = g.world_uvs(420.0)
-# Dark, damp earth with decaying leaves, broken by mossy patches.
-litter = g.mul(g.mask(g.sample(tex("T_Ground_Gravel_D"), moss_xy), g=True), g.color(0.2, 0.15, 0.1))
-litter = g.lerp(litter, g.mul(g.sample(tex("T_ground_Moss_D"), moss_xy), g.color(0.3, 0.36, 0.22)), g.const(0.35))
-litter = g.lerp(litter, g.mul(grass, g.const(0.7)), g.mul(patches, g.const(0.5)))
-litter = g.lerp(litter, g.color(0.06, 0.07, 0.035), g.mul(fade, g.const(0.8)))
+
+def scan(asset, kind, scale_cm, alt_scale_cm=None, normal=False):
+    """Sample a scan in world XY; blend in a second, axis-swapped sample to break up tiling."""
+    xy, _, _ = g.world_uvs(scale_cm)
+    a = g.sample(ph(asset, kind), xy, normal=normal)
+    if not alt_scale_cm:
+        return a
+    swapped = g.op(unreal.MaterialExpressionAppendVector, g.mask(wp, g=True), g.mask(wp, r=True))
+    b = g.sample(ph(asset, kind), g.mul(swapped, g.const(1.0 / alt_scale_cm)), normal=normal)
+    return g.lerp(a, b, blend)
+
+
+def far(near, far_color):
+    return g.lerp(near, g.color(*far_color), near_fade)
+
+
+# Meadow: lawn scan with a coarser second grass scan, soil patches, drying to straw with dryness.
+grass = scan("Grass004", "diff", 220.0, 530.0)
+grass = g.lerp(grass, scan("Grass001", "diff", 700.0), g.const(0.35))
+grass = g.lerp(grass, scan("forrest_ground_01", "diff", 400.0), g.mul(patches, g.const(0.35)))
+dry = scan("dry_ground_01", "diff", 400.0, 900.0)
+grass = far(grass, (0.07, 0.1, 0.035))
+dry = far(dry, (0.2, 0.16, 0.1))
+color = g.lerp(grass, g.lerp(grass, dry, g.const(0.8)), g.saturate(g.mul(dryness, g.const(1.2))))
+
+# Forest floor: leaf litter near; far away, the colour of the canopy that covers it.
+litter = far(scan("forest_leaves_02", "diff", 350.0, 810.0), (0.07, 0.055, 0.035))
+litter = g.lerp(litter, g.color(0.03, 0.05, 0.02), far_fade)
 color = g.lerp(color, litter, vc, "A")
 
-sand_xy, _, _ = g.world_uvs(300.0)
-gravel = g.sample(tex("T_Ground_Gravel_D"), sand_xy)
-sand = g.lerp(g.color(0.78, 0.66, 0.47), g.mul(gravel, g.color(1.3, 1.1, 0.8)), g.const(0.3))
-wet_sand = g.mul(sand, g.const(0.6))
-sand = g.lerp(sand, wet_sand, wetness)
+sand = far(scan("coast_sand_01", "diff", 400.0, 950.0), (0.5, 0.43, 0.32))
+sand = g.lerp(sand, g.mul(sand, g.const(0.6)), wetness)
 color = g.lerp(color, sand, vc, "R")
 
-slate = g.triplanar(tex("T_Rock_Slate_D"), 900.0, weights)
-sandstone = g.triplanar(tex("T_Rock_Sandstone_D"), 900.0, weights)
-rock = g.lerp(slate, sandstone, dryness)
+cliff = g.triplanar(ph("rock_face", "diff"), 1200.0, weights)
+scree = g.triplanar(ph("rocky_terrain_02", "diff"), 600.0, weights)
+rock = far(g.lerp(cliff, scree, g.lerp(g.const(0.35), g.const(0.75), dryness)), (0.22, 0.2, 0.18))
 color = g.lerp(color, rock, vc, "G")
 
-snow = g.mul(g.color(0.86, 0.89, 0.94), g.lerp(g.const(0.93), g.const(1.0), macro))
+snow = far(scan("snow_02", "diff", 500.0, 1100.0), (0.8, 0.83, 0.88))
 color = g.lerp(color, snow, vc, "B")
 lib.connect_material_property(g.mul(color, macro_scale), "", MP.MP_BASE_COLOR)
 
-normal = g.sample(tex("T_Ground_Grass_N"), near_xy, normal=True)
-normal = g.lerp(normal, g.sample(tex("T_Ground_Moss_N"), moss_xy, normal=True), vc, "A")
-normal = g.lerp(normal, g.sample(tex("T_Ground_Gravel_N"), sand_xy, normal=True), vc, "R")
-rock_n_xy, _, _ = g.world_uvs(900.0)
-normal = g.lerp(normal, g.sample(tex("T_Rock_Slate_N"), rock_n_xy, normal=True), vc, "G")
-normal = g.lerp(normal, g.color(0, 0, 1), vc, "B")
+normal = scan("Grass004", "nor", 220.0, normal=True)
+normal = g.lerp(normal, scan("forest_leaves_02", "nor", 350.0, normal=True), vc, "A")
+normal = g.lerp(normal, scan("coast_sand_01", "nor", 400.0, normal=True), vc, "R")
+rock_xy, _, _ = g.world_uvs(1200.0)
+normal = g.lerp(normal, g.sample(ph("rock_face", "nor"), rock_xy, normal=True), vc, "G")
+normal = g.lerp(normal, scan("snow_02", "nor", 500.0, normal=True), vc, "B")
+normal = g.lerp(normal, g.color(0, 0, 1), g.mul(near_fade, g.const(0.8)))
 lib.connect_material_property(normal, "", MP.MP_NORMAL)
 
-rough = g.lerp(g.const(0.94), g.const(0.82), vc, "G")
-rough = g.lerp(rough, g.const(0.55), vc, "B")
+rough = g.lerp(g.const(0.95), g.const(0.85), vc, "G")
+rough = g.lerp(rough, g.const(0.6), vc, "B")
 rough = g.lerp(rough, g.const(0.3), wetness)
 lib.connect_material_property(rough, "", MP.MP_ROUGHNESS)
-lib.connect_material_property(g.const(0.35), "", MP.MP_SPECULAR)
+lib.connect_material_property(g.const(0.3), "", MP.MP_SPECULAR)
 finish(m)
 
 # ---------------------------------------------------------------------------------------------
@@ -420,6 +427,80 @@ try:
     unreal.log("M_Grass: wind sway connected")
 except Exception as ex:
     unreal.log_warning(f"M_Grass: wind sway not connected ({ex}); grass will be still")
+finish(m)
+
+# ---------------------------------------------------------------------------------------------
+# Buildings: one parent that world-projects a scanned surface (Diffuse / Normal / ARM parameters) on
+# instanced boxes, and an instance per surface type. Custom data [0..2] tints (e.g. plaster colour).
+m = new_material("M_BuildingSurface")
+m.set_editor_property("used_with_instanced_static_meshes", True)
+g = Graph(m)
+cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
+tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
+scale = g.node(unreal.MaterialExpressionScalarParameter, parameter_name="ScaleCm", default_value=200.0)
+wp = g.node(unreal.MaterialExpressionWorldPosition)
+inv = g.op(unreal.MaterialExpressionDivide, g.const(1.0), scale)
+planes = [g.mul(g.mask(wp, r=True, g=True), inv), g.mul(g.mask(wp, r=True, b=True), inv), g.mul(g.mask(wp, g=True, b=True), inv)]
+wz, wy, wx = None, None, None
+nw = g.normal_weights()
+
+
+def param_triplanar(name, normal=False):
+    out = None
+    for uv, w in zip(planes, (nw[2], nw[1], nw[0])):
+        n = g.node(unreal.MaterialExpressionTextureSampleParameter2D, parameter_name=name)
+        if normal:
+            n.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+            n.set_editor_property("texture", tex("T_Ground_Grass_N"))
+        else:
+            n.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_COLOR if name == "Diffuse" else unreal.MaterialSamplerType.SAMPLERTYPE_LINEAR_COLOR)
+            n.set_editor_property("texture", tex("T_Ground_Grass_D"))
+        n.set_editor_property("sampler_source", unreal.SamplerSourceMode.SSM_WRAP_WORLD_GROUP_SETTINGS)
+        g.link(uv, n, "UVs")
+        term = g.mul(n, w)
+        out = term if out is None else g.add(out, term)
+    return out
+
+
+lib.connect_material_property(g.mul(param_triplanar("Diffuse"), tint), "", MP.MP_BASE_COLOR)
+lib.connect_material_property(param_triplanar("Normal", True), "", MP.MP_NORMAL)
+arm = param_triplanar("ARM")
+lib.connect_material_property(arm, "G", MP.MP_ROUGHNESS)
+lib.connect_material_property(arm, "R", MP.MP_AMBIENT_OCCLUSION)
+finish(m)
+parent = m
+
+SURFACES = {
+    "ExteriorWall": ("white_stucco", 250.0), "BrickWall": ("brick_wall_001", 180.0), "TimberWall": ("brown_planks_03", 200.0),
+    "InteriorWall": ("white_plaster_02", 250.0), "PlankFloor": ("plank_flooring", 220.0), "TileFloor": ("floor_tiles_06", 150.0),
+    "Stone": ("medieval_wall_01", 250.0), "ClayRoof": ("clay_roof_tiles", 250.0), "SlateRoof": ("roof_slates_02", 250.0),
+    "Wood": ("laminate_floor_02", 150.0),
+}
+for name, (asset, scale_cm) in SURFACES.items():
+    path = f"{FOLDER}/Building/MI_{name}"
+    if unreal.EditorAssetLibrary.does_asset_exist(path):
+        unreal.EditorAssetLibrary.delete_asset(path)
+    mi = tools.create_asset(f"MI_{name}", f"{FOLDER}/Building", unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
+    lib.set_material_instance_parent(mi, parent)
+    for p_name, kind in (("Diffuse", "diff"), ("Normal", "nor"), ("ARM", "arm")):
+        t = unreal.load_asset(f"/Game/PolyHaven/Textures/{asset}/{asset}_{kind}")
+        if t:
+            lib.set_material_instance_texture_parameter_value(mi, p_name, t)
+    lib.set_material_instance_scalar_parameter_value(mi, "ScaleCm", scale_cm)
+    unreal.EditorAssetLibrary.save_loaded_asset(mi)
+    unreal.log(f"Created {path}")
+
+# Window glass: see-through, slightly reflective.
+m = new_material("M_Glass")
+m.set_editor_property("used_with_instanced_static_meshes", True)
+m.set_editor_property("blend_mode", unreal.BlendMode.BLEND_TRANSLUCENT)
+m.set_editor_property("two_sided", True)
+g = Graph(m)
+fres = g.node(unreal.MaterialExpressionFresnel, exponent=4.0)
+lib.connect_material_property(g.color(0.02, 0.03, 0.035), "", MP.MP_BASE_COLOR)
+lib.connect_material_property(g.lerp(g.const(0.12), g.const(0.6), fres), "", MP.MP_OPACITY)
+lib.connect_material_property(g.const(0.05), "", MP.MP_ROUGHNESS)
+lib.connect_material_property(g.const(0.8), "", MP.MP_SPECULAR)
 finish(m)
 
 for old in ("M_InstanceColor",):

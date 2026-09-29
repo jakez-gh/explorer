@@ -1,7 +1,10 @@
 #include "Procedural/TerrainStreamer.h"
 #include "Procedural/WorldGen.h"
+#include "Procedural/HouseGen.h"
+#include "AssetRegistry/AssetRegistryModule.h"
 #include "ProceduralMeshComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/CollisionProfile.h"
 #include "Engine/StaticMesh.h"
@@ -290,6 +293,60 @@ void ATerrainStreamer::BeginPlay()
 	for (int32 Variant = 0; Variant < NumIslandVariants; ++Variant)
 	{
 		PartMeshes[Island0 + Variant] = CreateIslandMesh(Variant);
+	}
+	// House surfaces: boxes with photoscanned building materials.
+	{
+		static const TCHAR* Names[] = { TEXT("ExteriorWall"), TEXT("BrickWall"), TEXT("TimberWall"), TEXT("InteriorWall"), TEXT("PlankFloor"),
+			TEXT("TileFloor"), TEXT("Stone"), TEXT("ClayRoof"), TEXT("SlateRoof"), TEXT("Wood") };
+		static_assert(UE_ARRAY_COUNT(Names) + 1 == static_cast<int32>(HouseGen::ESurface::Count), "one material per surface (plus glass)");
+		for (int32 i = 0; i < static_cast<int32>(HouseGen::ESurface::Count); ++i)
+		{
+			PartMeshes[BuildSurf0 + i] = PartMeshes[Cube];
+			const FString Path = i < UE_ARRAY_COUNT(Names)
+				? FString::Printf(TEXT("/Game/Explorer/Materials/Building/MI_%s.MI_%s"), Names[i], Names[i])
+				: FString(TEXT("/Game/Explorer/Materials/M_Glass.M_Glass"));
+			UMaterialInterface* Material = LoadObject<UMaterialInterface>(nullptr, *Path, nullptr, LOAD_Quiet | LOAD_NoWarn);
+			PartMaterials[BuildSurf0 + i] = Material ? Material : PartMaterials[Cube].Get();
+		}
+	}
+
+	// Furniture: CC0 scanned models imported by Tools/import_assets.py. Each folder may hold several
+	// meshes (parts of a set); take the largest. Missing models fall back to a small box.
+	{
+		static const TCHAR* Models[] = { TEXT("Sofa_01"), TEXT("ArmChair_01"), TEXT("CoffeeTable_01"), TEXT("wooden_bookshelf_worn"),
+			TEXT("dining_table"), TEXT("dining_chair_02"), TEXT("electric_stove"), TEXT("painted_wooden_cabinet"), TEXT("vintage_cabinet_01"),
+			TEXT("GothicBed_01"), TEXT("painted_wooden_nightstand"), TEXT("vintage_wooden_drawer_01"), TEXT("ornate_mirror_01"), TEXT("Shelf_01"),
+			TEXT("wall_clock"), TEXT("scandinavian_masonry_heater"), TEXT("modern_ceiling_lamp_01") };
+		static_assert(UE_ARRAY_COUNT(Models) == static_cast<int32>(HouseGen::EFurniture::Count), "one model per furniture type");
+		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		for (int32 i = 0; i < UE_ARRAY_COUNT(Models); ++i)
+		{
+			TArray<FAssetData> Assets;
+			Registry.GetAssetsByPath(FName(*FString::Printf(TEXT("/Game/PolyHaven/Models/%s"), Models[i])), Assets, true);
+			UStaticMesh* Best = nullptr;
+			double BestSize = -1.0;
+			for (const FAssetData& Asset : Assets)
+			{
+				if (Asset.IsInstanceOf(UStaticMesh::StaticClass()))
+				{
+					UStaticMesh* Mesh = Cast<UStaticMesh>(Asset.GetAsset());
+					const double Size = Mesh ? Mesh->GetBoundingBox().GetVolume() : -1.0;
+					if (Size > BestSize)
+					{
+						Best = Mesh;
+						BestSize = Size;
+					}
+				}
+			}
+			PartMeshes[Furniture0 + i] = Best ? Best : PartMeshes[Cube].Get();
+			PartMaterials[Furniture0 + i] = Best ? nullptr : PartMaterials[Cube].Get();
+		}
+	}
+
+	PartBounds.SetNum(NumParts);
+	for (int32 Part = 0; Part < NumParts; ++Part)
+	{
+		PartBounds[Part] = PartMeshes[Part] ? PartMeshes[Part]->GetBoundingBox() : FBox(FVector(-50.0), FVector(50.0));
 	}
 }
 
@@ -612,6 +669,37 @@ UStaticMesh* ATerrainStreamer::CreateTreeMesh(ETreeVariant Variant, FTreeTemplat
 	return Mesh;
 }
 
+void ATerrainStreamer::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// Workers read this actor; let them finish before it goes away.
+	UE::Tasks::Wait(Tasks);
+	Tasks.Reset();
+	Super::EndPlay(EndPlayReason);
+}
+
+void ATerrainStreamer::LaunchJob(TFunction<void(FJobResult&)>&& Work, EJobKind Kind, const FIntPoint& Coord)
+{
+	Tasks.Add(UE::Tasks::Launch(UE_SOURCE_LOCATION, [this, Work = MoveTemp(Work), Kind, Coord]()
+	{
+		TSharedPtr<FJobResult, ESPMode::ThreadSafe> Result = MakeShared<FJobResult, ESPMode::ThreadSafe>();
+		Result->Kind = Kind;
+		Result->Coord = Coord;
+		Work(*Result);
+		Results.Enqueue(Result);
+	}, UE::Tasks::ETaskPriority::BackgroundHigh));
+}
+
+float ATerrainStreamer::RingEnd(int32 Step) const
+{
+	switch (Step)
+	{
+	case 1: return 5.5f;
+	case 2: return 9.5f;
+	case 4: return 13.5f;
+	default: return 0.0f; // step 8 meets the far tiles, which are the same resolution
+	}
+}
+
 void ATerrainStreamer::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
@@ -626,9 +714,32 @@ void ATerrainStreamer::Tick(float DeltaTime)
 	PlayerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
 	const FIntPoint Center = WorldToChunk(ViewLocation);
 
+	// Estimate where we're heading, so work goes to what's about to come into view.
+	if (DeltaTime > 0.0f && !LastViewLocation.IsZero())
+	{
+		const FVector Instant = (ViewLocation - LastViewLocation) / DeltaTime;
+		ViewVelocity = Instant.Size() > 200000.0f ? FVector::ZeroVector : FMath::VInterpTo(ViewVelocity, Instant, DeltaTime, 3.0f);
+	}
+	LastViewLocation = ViewLocation;
+	const float ChunkSize = ChunkWorldSize();
+	FVector2D Ahead = FVector2D(ViewVelocity) * LookAheadSeconds / ChunkSize;
+	Ahead = Ahead.GetClampedToMaxSize(6.0f);
+	const FVector2D ViewChunk = FVector2D(ViewLocation) / ChunkSize;
+	const FVector2D Predicted = ViewChunk + Ahead;
+	const FVector2D Facing = FVector2D(ViewRotation.Vector()).GetSafeNormal();
+
 	// The ocean is one big plane at sea level that follows the viewer, reaching well past the fog so its edge never shows.
 	Ocean->SetWorldLocation(FVector(ViewLocation.X, ViewLocation.Y, 0.0));
 	Ocean->SetWorldScale3D(FVector(200000.0, 200000.0, 1.0));
+
+	// Upload finished work within the frame budget.
+	const double Deadline = FPlatformTime::Seconds() + BuildBudgetMs * 0.001;
+	TSharedPtr<FJobResult, ESPMode::ThreadSafe> Result;
+	while (FPlatformTime::Seconds() < Deadline && Results.Dequeue(Result))
+	{
+		ApplyChunk(*Result, Center);
+	}
+	Tasks.RemoveAll([](const UE::Tasks::FTask& Task) { return Task.IsCompleted(); });
 
 	// Recycle chunks outside the view disc (with one chunk of hysteresis).
 	const int32 UnloadRadiusSq = FMath::Square(ViewRadius + 1);
@@ -641,14 +752,17 @@ void ATerrainStreamer::Tick(float DeltaTime)
 		}
 	}
 
-	// Work out what each chunk in view should look like, and queue the ones that don't yet. Nearest first.
+	// Work out what each chunk in view should look like, and queue what doesn't match yet: the path
+	// ahead first, then what's in front of the camera, then the rest.
 	struct FWork
 	{
-		int32 DistSq;
+		float Score;
 		FIntPoint Coord;
 		int32 Step;
 		bool bCollision;
 		EProps Props;
+		bool bSurface;
+		bool bProps;
 	};
 	TArray<FWork> Work;
 	for (int32 DY = -ViewRadius; DY <= ViewRadius; ++DY)
@@ -661,37 +775,83 @@ void ATerrainStreamer::Tick(float DeltaTime)
 				continue;
 			}
 			const FIntPoint Coord = Center + FIntPoint(DX, DY);
-			const int32 Step = StepForDistance(FMath::Sqrt(static_cast<float>(DistSq)));
+			if (ChunkJobs.Contains(Coord))
+			{
+				continue;
+			}
+			const float Dist = FMath::Sqrt(static_cast<float>(DistSq));
+			const int32 Step = StepForDistance(Dist);
 			const bool bCollision = DistSq <= CollisionRadius * CollisionRadius;
 			const EProps Props = DistSq <= DetailRadius * DetailRadius ? EProps::Full
 				: (NumLoadedScanned > 0 && DistSq <= TreeRadius * TreeRadius) ? EProps::Trees : EProps::Landmarks;
 
 			const FChunk* Existing = Chunks.Find(Coord);
-			if (!Existing || Existing->Step != Step || (bCollision && !Existing->bHasCollision) || Existing->Props != Props)
+			bool bSurface = !Existing || !Existing->Mesh || Existing->Step != Step || (bCollision && !Existing->bHasCollision);
+			// Refresh the geomorph of chunks in a ring's blend band once the viewer has moved on.
+			const float End = RingEnd(Step);
+			if (!bSurface && End > 0.0f && Dist > End - 2.5f && (Existing->BuiltCenter - Center).SizeSquared() >= 1)
 			{
-				Work.Add({ DistSq, Coord, Step, bCollision, Props });
+				bSurface = true;
 			}
+			const bool bProps = !Existing || Existing->Props != Props;
+			if (!bSurface && !bProps)
+			{
+				continue;
+			}
+			const FVector2D ChunkMid = FVector2D(Coord) + FVector2D(0.5f);
+			const FVector2D ToChunk = ChunkMid - ViewChunk;
+			const float InFront = ToChunk.SizeSquared() > 1.0f ? FVector2D::DotProduct(ToChunk.GetSafeNormal(), Facing) : 1.0f;
+			const float Score = (0.35f * Dist + 0.65f * FVector2D::Distance(ChunkMid, Predicted)) * (1.0f + 0.4f * (1.0f - InFront)) - (DistSq <= 2 ? 100.0f : 0.0f);
+			Work.Add({ Score, Coord, Step, bCollision, Props, bSurface, bProps });
 		}
 	}
-	Work.Sort([](const FWork& A, const FWork& B) { return A.DistSq < B.DistSq; });
+	Work.Sort([](const FWork& A, const FWork& B) { return A.Score < B.Score; });
 
-	const double Deadline = FPlatformTime::Seconds() + BuildBudgetMs * 0.001;
-	for (int32 i = 0; i < Work.Num(); ++i)
+	// How far behind we are on what's right around and ahead of the viewer.
 	{
-		if (i > 0 && FPlatformTime::Seconds() > Deadline)
+		int32 Missing = 0;
+		for (const FWork& Item : Work)
+		{
+			Missing += (Item.Score < 5.0f) ? 1 : 0;
+		}
+		for (const FIntPoint& Coord : ChunkJobs)
+		{
+			Missing += (FVector2D::Distance(FVector2D(Coord) + FVector2D(0.5f), Predicted) < 4.0f) ? 1 : 0;
+		}
+		Backlog = FMath::Clamp(Missing / 20.0f, 0.0f, 1.0f);
+	}
+
+	for (const FWork& Item : Work)
+	{
+		if (Tasks.Num() >= MaxJobsInFlight)
 		{
 			break;
 		}
-		const FWork& Item = Work[i];
-		FChunk& Chunk = Chunks.FindOrAdd(Item.Coord);
-		if (!Chunk.Mesh || Chunk.Step != Item.Step || (Item.bCollision && !Chunk.bHasCollision))
+		ChunkJobs.Add(Item.Coord);
+		const FVector Origin(Item.Coord.X * ChunkSize, Item.Coord.Y * ChunkSize, 0.0);
+		const float End = RingEnd(Item.Step) * ChunkSize;
+		const FVector2D MorphCenter(ViewLocation);
+		LaunchJob([this, Item, Origin, End, MorphCenter, Center](FJobResult& Out)
 		{
-			BuildTerrain(Item.Coord, Chunk, Item.Step, Item.bCollision);
-		}
-		if (Chunk.Props != Item.Props)
-		{
-			BuildProps(Item.Coord, Chunk, Item.Props);
-		}
+			Out.Step = Item.Step;
+			Out.bCollision = Item.bCollision;
+			Out.Props = Item.Props;
+			Out.BuiltCenter = Center;
+			if (Item.bSurface)
+			{
+				Out.bSurface = true;
+				ComputeSurface(Out.Surface, Origin, ChunkResolution / Item.Step, GridSpacing * Item.Step, MorphCenter, End > 0.0f ? End - 2.0f * ChunkWorldSize() : 0.0f, End);
+				if (Item.Step == 1)
+				{
+					ComputePaths(Item.Coord, Out.Paths);
+				}
+			}
+			if (Item.bProps)
+			{
+				Out.bProps = true;
+				ComputeProps(Item.Coord, Item.Props, Out);
+			}
+		}, EJobKind::Chunk, Item.Coord);
 	}
 
 	// Solid props only need physics right around the viewer; creating bodies for every trunk in the
@@ -703,7 +863,7 @@ void ATerrainStreamer::Tick(float DeltaTime)
 		{
 			for (int32 Part = 0; Part < Tree0; ++Part)
 			{
-				if (Part != Bush && Part != IslandBush && Pair.Value.Parts[Part])
+				if (Part != Bush && Part != IslandBush && Part < Furniture0 && Part != BuildSurf0 + static_cast<int32>(HouseGen::ESurface::Glass) && Pair.Value.Parts[Part])
 				{
 					Pair.Value.Parts[Part]->SetCollisionEnabled(bWant ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
 				}
@@ -714,6 +874,109 @@ void ATerrainStreamer::Tick(float DeltaTime)
 
 	UpdateGrass(ViewLocation, Deadline);
 	UpdateFarTerrain(Center, Deadline);
+}
+
+void ATerrainStreamer::ApplyChunk(FJobResult& Result, const FIntPoint& Center)
+{
+	if (Result.Kind == EJobKind::Far)
+	{
+		FarJobs.Remove(Result.Coord);
+		if (!FarTiles.Contains(Result.Coord))
+		{
+			UProceduralMeshComponent* Mesh = AcquireMesh();
+			const double TileSize = ChunkWorldSize() * FarTileChunks;
+			ApplySurface(Mesh, FVector(Result.Coord.X * TileSize, Result.Coord.Y * TileSize, -FarTileDrop), Result.Surface, false, TerrainMaterial);
+			FarTiles.Add(Result.Coord, Mesh);
+		}
+		return;
+	}
+	if (Result.Kind == EJobKind::Grass)
+	{
+		GrassJobs.Remove(Result.Coord);
+		if (!GrassTiles.Contains(Result.Coord))
+		{
+			UHierarchicalInstancedStaticMeshComponent* Component = GrassPool.Num() > 0 ? GrassPool.Pop(EAllowShrinking::No) : nullptr;
+			if (!Component)
+			{
+				Component = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
+				Component->SetMobility(EComponentMobility::Movable);
+				Component->SetStaticMesh(GrassMesh);
+				Component->SetMaterial(0, GrassMaterial);
+				Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+				Component->SetCastShadow(false);
+				Component->NumCustomDataFloats = 3;
+				Component->SetupAttachment(RootComponent);
+				Component->RegisterComponent();
+				AllParts.Add(Component);
+			}
+			Component->SetVisibility(true);
+			SetInstances(Component, Result.Transforms[0], Result.CustomData[0]);
+			GrassTiles.Add(Result.Coord, Component);
+		}
+		return;
+	}
+
+	ChunkJobs.Remove(Result.Coord);
+	if ((Result.Coord - Center).SizeSquared() > FMath::Square(ViewRadius + 1))
+	{
+		return; // flew past it while it was being built
+	}
+	FChunk& Chunk = Chunks.FindOrAdd(Result.Coord);
+	if (Result.bSurface)
+	{
+		if (!Chunk.Mesh)
+		{
+			Chunk.Mesh = AcquireMesh();
+		}
+		ApplySurface(Chunk.Mesh, FVector(Result.Coord.X * ChunkWorldSize(), Result.Coord.Y * ChunkWorldSize(), 0.0), Result.Surface, Result.bCollision, TerrainMaterial);
+		// Paths sit exactly on full-detail terrain, so they exist only there.
+		if (Result.Step == 1 && Result.Paths.Vertices.Num() > 0)
+		{
+			if (!Chunk.PathMesh)
+			{
+				Chunk.PathMesh = AcquireMesh();
+			}
+			ApplySurface(Chunk.PathMesh, FVector(Result.Coord.X * ChunkWorldSize(), Result.Coord.Y * ChunkWorldSize(), 0.0), Result.Paths, false, PathMaterial);
+			Chunk.PathMesh->SetCastShadow(false);
+		}
+		else if (Chunk.PathMesh)
+		{
+			Chunk.PathMesh->ClearAllMeshSections();
+			Chunk.PathMesh->SetVisibility(false);
+			MeshPool.Add(Chunk.PathMesh);
+			Chunk.PathMesh = nullptr;
+		}
+		Chunk.Step = Result.Step;
+		Chunk.bHasCollision = Result.bCollision;
+		Chunk.BuiltCenter = Result.BuiltCenter;
+	}
+	if (Result.bProps)
+	{
+		for (int32 Part = 0; Part < NumParts; ++Part)
+		{
+			UInstancedStaticMeshComponent*& Component = Chunk.Parts[Part];
+			if (Result.Transforms[Part].Num() == 0)
+			{
+				if (Component)
+				{
+					Component->ClearInstances();
+					Component->SetVisibility(false);
+					PartPools[Part].Add(Component);
+					Component = nullptr;
+				}
+				continue;
+			}
+			if (!Component)
+			{
+				Component = AcquirePart(static_cast<EPropPart>(Part));
+			}
+			// Start without physics; Tick enables it if this chunk is close enough.
+			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			SetInstances(Component, Result.Transforms[Part], Result.CustomData[Part]);
+		}
+		Chunk.Props = Result.Props;
+		Chunk.bPropCollision = false;
+	}
 }
 
 void ATerrainStreamer::UpdateFarTerrain(const FIntPoint& Center, double Deadline)
@@ -753,7 +1016,7 @@ void ATerrainStreamer::UpdateFarTerrain(const FIntPoint& Center, double Deadline
 		for (int32 DX = -TileRadius; DX <= TileRadius; ++DX)
 		{
 			const FIntPoint Tile = CenterTile + FIntPoint(DX, DY);
-			if (DX * DX + DY * DY <= TileRadius * TileRadius && !FarTiles.Contains(Tile) && !Covered(Tile))
+			if (DX * DX + DY * DY <= TileRadius * TileRadius && !FarTiles.Contains(Tile) && !FarJobs.Contains(Tile) && !Covered(Tile))
 			{
 				Missing.Emplace(DX * DX + DY * DY, Tile);
 			}
@@ -764,13 +1027,16 @@ void ATerrainStreamer::UpdateFarTerrain(const FIntPoint& Center, double Deadline
 	const double TileSize = ChunkWorldSize() * FarTileChunks;
 	for (const TPair<int32, FIntPoint>& Item : Missing)
 	{
-		if (FPlatformTime::Seconds() > Deadline)
+		if (Tasks.Num() >= MaxJobsInFlight + 4)
 		{
 			break;
 		}
-		UProceduralMeshComponent* Mesh = AcquireMesh();
-		BuildSurface(Mesh, FVector(Item.Value.X * TileSize, Item.Value.Y * TileSize, -FarTileDrop), FarTileResolution, TileSize / FarTileResolution, false);
-		FarTiles.Add(Item.Value, Mesh);
+		FarJobs.Add(Item.Value);
+		const FVector Origin(Item.Value.X * TileSize, Item.Value.Y * TileSize, -FarTileDrop);
+		LaunchJob([this, Origin, TileSize](FJobResult& Out)
+		{
+			ComputeSurface(Out.Surface, Origin, FarTileResolution, TileSize / FarTileResolution);
+		}, EJobKind::Far, Item.Value);
 	}
 }
 
@@ -868,7 +1134,7 @@ void ATerrainStreamer::UpdateGrass(const FVector& ViewLocation, double Deadline)
 		for (int32 DX = -Radius; DX <= Radius; ++DX)
 		{
 			const FIntPoint Tile = Center + FIntPoint(DX, DY);
-			if (DX * DX + DY * DY <= Radius * Radius && !GrassTiles.Contains(Tile))
+			if (DX * DX + DY * DY <= Radius * Radius && !GrassTiles.Contains(Tile) && !GrassJobs.Contains(Tile))
 			{
 				Missing.Emplace(DX * DX + DY * DY, Tile);
 			}
@@ -876,33 +1142,22 @@ void ATerrainStreamer::UpdateGrass(const FVector& ViewLocation, double Deadline)
 	}
 	Missing.Sort([](const TPair<int32, FIntPoint>& A, const TPair<int32, FIntPoint>& B) { return A.Key < B.Key; });
 
-	for (int32 i = 0; i < Missing.Num(); ++i)
+	for (const TPair<int32, FIntPoint>& Item : Missing)
 	{
-		if (i > 0 && FPlatformTime::Seconds() > Deadline)
+		if (Tasks.Num() >= MaxJobsInFlight + 8)
 		{
 			break;
 		}
-		UHierarchicalInstancedStaticMeshComponent* Component = GrassPool.Num() > 0 ? GrassPool.Pop(EAllowShrinking::No) : nullptr;
-		if (!Component)
+		GrassJobs.Add(Item.Value);
+		const FIntPoint Tile = Item.Value;
+		LaunchJob([this, Tile](FJobResult& Out)
 		{
-			Component = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
-			Component->SetMobility(EComponentMobility::Movable);
-			Component->SetStaticMesh(GrassMesh);
-			Component->SetMaterial(0, GrassMaterial);
-			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-			Component->SetCastShadow(false);
-			Component->NumCustomDataFloats = 3;
-			Component->SetupAttachment(RootComponent);
-			Component->RegisterComponent();
-			AllParts.Add(Component);
-		}
-		Component->SetVisibility(true);
-		BuildGrassTile(Missing[i].Value, Component);
-		GrassTiles.Add(Missing[i].Value, Component);
+			ComputeGrassTile(Tile, Out.Transforms[0], Out.CustomData[0]);
+		}, EJobKind::Grass, Tile);
 	}
 }
 
-void ATerrainStreamer::BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstancedStaticMeshComponent* Component) const
+void ATerrainStreamer::ComputeGrassTile(const FIntPoint& Tile, TArray<FTransform>& Transforms, TArray<float>& Data) const
 {
 	// Sample the world on the terrain's own 5 m grid, then place each clump on the exact rendered triangle.
 	const int32 Cells = FMath::RoundToInt(GrassTileSize / GridSpacing);
@@ -920,8 +1175,6 @@ void ATerrainStreamer::BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstan
 	TArray<WorldGen::FPath> Paths;
 	WorldGen::PathsNear(Origin, Origin + FVector2D(GrassTileSize), 500.0, Paths);
 
-	TArray<FTransform> Transforms;
-	TArray<float> Data;
 	const float ClumpSpacing = GrassTileSize / GrassClumpsPerSide;
 	for (int32 GY = 0; GY < GrassClumpsPerSide; ++GY)
 	{
@@ -974,49 +1227,27 @@ void ATerrainStreamer::BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstan
 			Data.Append({ Tint.R, Tint.G, Tint.B });
 		}
 	}
-
-	Component->ClearInstances();
-	if (Transforms.Num() > 0)
-	{
-		SetInstances(Component, Transforms, Data);
-	}
 }
 
-void ATerrainStreamer::SetInstances(UHierarchicalInstancedStaticMeshComponent* Component, const TArray<FTransform>& Transforms, const TArray<float>& CustomData)
+void ATerrainStreamer::SetInstances(UInstancedStaticMeshComponent* Component, const TArray<FTransform>& Transforms, const TArray<float>& CustomData)
 {
-	// Add all instances and write their custom data in one go, then build the culling tree once
-	// (per-instance SetCustomData calls each trigger work in the hierarchical component).
+	// Add all instances and write their custom data in one go, then (for hierarchical components)
+	// build the culling tree once; Nanite meshes use plain instancing and skip that entirely.
 	Component->ClearInstances();
+	if (Transforms.Num() == 0)
+	{
+		return;
+	}
 	Component->AddInstances(Transforms, false, true);
 	if (Component->PerInstanceSMCustomData.Num() == CustomData.Num())
 	{
 		FMemory::Memcpy(Component->PerInstanceSMCustomData.GetData(), CustomData.GetData(), CustomData.Num() * sizeof(float));
 	}
-	Component->BuildTreeIfOutdated(true, true);
+	if (UHierarchicalInstancedStaticMeshComponent* Hierarchical = Cast<UHierarchicalInstancedStaticMeshComponent>(Component))
+	{
+		Hierarchical->BuildTreeIfOutdated(true, true);
+	}
 	Component->MarkRenderStateDirty();
-}
-
-void ATerrainStreamer::BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32 Step, bool bWithCollision)
-{
-	if (!Chunk.Mesh)
-	{
-		Chunk.Mesh = AcquireMesh();
-	}
-	BuildSurface(Chunk.Mesh, FVector(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize(), 0.0), ChunkResolution / Step, GridSpacing * Step, bWithCollision);
-	// Paths sit exactly on full-detail terrain, so they exist only there.
-	if (Step == 1 && Chunk.Step != 1)
-	{
-		BuildPaths(Coord, Chunk);
-	}
-	else if (Step != 1 && Chunk.PathMesh)
-	{
-		Chunk.PathMesh->ClearAllMeshSections();
-		Chunk.PathMesh->SetVisibility(false);
-		MeshPool.Add(Chunk.PathMesh);
-		Chunk.PathMesh = nullptr;
-	}
-	Chunk.Step = Step;
-	Chunk.bHasCollision = bWithCollision;
 }
 
 float ATerrainStreamer::SurfaceHeight(double X, double Y) const
@@ -1037,18 +1268,13 @@ float ATerrainStreamer::SurfaceHeight(double X, double Y) const
 		: TR + (1.0f - FX) * (TL - TR) + (1.0f - FY) * (BR - TR);
 }
 
-void ATerrainStreamer::BuildPaths(const FIntPoint& Coord, FChunk& Chunk)
+void ATerrainStreamer::ComputePaths(const FIntPoint& Coord, FSurfaceData& Out) const
 {
 	const FVector2D Min(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize());
 	const FVector2D Max = Min + FVector2D(ChunkWorldSize());
 	TArray<WorldGen::FPath> Paths;
 	WorldGen::PathsNear(Min, Max, 1000.0, Paths);
 
-	TArray<FVector> Vertices;
-	TArray<int32> Triangles;
-	TArray<FVector> Normals;
-	TArray<FVector2D> UVs;
-	TArray<FColor> Colors;
 	constexpr float Step = 250.0f;
 	for (const WorldGen::FPath& Path : Paths)
 	{
@@ -1069,39 +1295,26 @@ void ATerrainStreamer::BuildPaths(const FIntPoint& Coord, FChunk& Chunk)
 			}
 			const FVector2D Dir = (WorldGen::PathPoint(Path, FMath::Min(T + 0.5f / Count, 1.0f)) - WorldGen::PathPoint(Path, FMath::Max(T - 0.5f / Count, 0.0f))).GetSafeNormal();
 			const FVector2D Side(-Dir.Y, Dir.X);
-			const int32 Base = Vertices.Num();
+			const int32 Base = Out.Vertices.Num();
 			for (const float Edge : { -0.5f, 0.5f })
 			{
 				const FVector2D Q = P + Side * Path.Width * Edge;
-				Vertices.Add(FVector(Q.X - Min.X, Q.Y - Min.Y, SurfaceHeight(Q.X, Q.Y) + 8.0f));
-				Normals.Add(FVector::UpVector);
-				UVs.Add(FVector2D(Edge + 0.5f, T * Length / 400.0f));
-				Colors.Add(Path.bRoad ? FColor(255, 0, 0, 255) : FColor(0, 0, 0, 255));
+				Out.Vertices.Add(FVector(Q.X - Min.X, Q.Y - Min.Y, SurfaceHeight(Q.X, Q.Y) + 8.0f));
+				Out.Normals.Add(FVector::UpVector);
+				Out.UV0.Add(FVector2D(Edge + 0.5f, T * Length / 400.0f));
+				Out.Colors.Add(Path.bRoad ? FColor(255, 0, 0, 255) : FColor(0, 0, 0, 255));
 			}
 			if (Prev != INDEX_NONE)
 			{
-				Triangles.Append({ Prev, Base, Prev + 1, Prev + 1, Base, Base + 1 });
-				Triangles.Append({ Prev, Prev + 1, Base, Prev + 1, Base + 1, Base }); // both faces, winding-proof
+				Out.Triangles.Append({ Prev, Base, Prev + 1, Prev + 1, Base, Base + 1 });
+				Out.Triangles.Append({ Prev, Prev + 1, Base, Prev + 1, Base + 1, Base }); // both faces, winding-proof
 			}
 			Prev = Base;
 		}
 	}
-
-	if (Vertices.Num() == 0)
-	{
-		return;
-	}
-	if (!Chunk.PathMesh)
-	{
-		Chunk.PathMesh = AcquireMesh();
-	}
-	Chunk.PathMesh->SetWorldLocation(FVector(Min.X, Min.Y, 0.0));
-	Chunk.PathMesh->CreateMeshSection(0, Vertices, Triangles, Normals, UVs, Colors, TArray<FProcMeshTangent>(), false);
-	Chunk.PathMesh->SetMaterial(0, PathMaterial);
-	Chunk.PathMesh->SetCastShadow(false);
 }
 
-void ATerrainStreamer::BuildSurface(UProceduralMeshComponent* Mesh, const FVector& Origin, int32 N, float Spacing, bool bWithCollision) const
+void ATerrainStreamer::ComputeSurface(FSurfaceData& Out, const FVector& Origin, int32 N, float Spacing, const FVector2D& MorphCenter, float MorphStart, float MorphEnd) const
 {
 	const int32 Side = N + 1;
 
@@ -1118,20 +1331,29 @@ void ATerrainStreamer::BuildSurface(UProceduralMeshComponent* Mesh, const FVecto
 	}
 	auto At = [&](int32 X, int32 Y) -> const FWorldSample& { return Samples[(Y + 1) * PaddedSide + (X + 1)]; };
 
-	TArray<FVector> Vertices;
-	TArray<FVector> Normals;
-	TArray<FVector2D> UV0;
-	TArray<FVector2D> UV1;
-	TArray<FColor> LayerWeights;
-	TArray<int32> Triangles;
+	// Height of the next-coarser grid (twice the spacing) at a fine vertex, using the coarse mesh's own
+	// triangle split, so a fully morphed edge matches the neighbouring coarser chunk exactly.
+	auto CoarseHeight = [&](int32 X, int32 Y)
+	{
+		const int32 IX = FMath::Min((X / 2) * 2, N - 2);
+		const int32 IY = FMath::Min((Y / 2) * 2, N - 2);
+		const float FX = (X - IX) * 0.5f;
+		const float FY = (Y - IY) * 0.5f;
+		const float BL = At(IX, IY).Height, BR = At(IX + 2, IY).Height, TL = At(IX, IY + 2).Height, TR = At(IX + 2, IY + 2).Height;
+		return FX + FY <= 1.0f
+			? BL + FX * (BR - BL) + FY * (TL - BL)
+			: TR + (1.0f - FX) * (TL - TR) + (1.0f - FY) * (BR - TR);
+	};
+	const bool bMorph = MorphEnd > MorphStart && N >= 2 && (N % 2) == 0;
+
 	const int32 NumSkirt = 4 * N;
 	const int32 NumVerts = Side * Side + NumSkirt;
-	Vertices.Reserve(NumVerts);
-	Normals.Reserve(NumVerts);
-	UV0.Reserve(NumVerts);
-	UV1.Reserve(NumVerts);
-	LayerWeights.Reserve(NumVerts);
-	Triangles.Reserve(N * N * 6 + NumSkirt * 12);
+	Out.Vertices.Reserve(NumVerts);
+	Out.Normals.Reserve(NumVerts);
+	Out.UV0.Reserve(NumVerts);
+	Out.UV1.Reserve(NumVerts);
+	Out.Colors.Reserve(NumVerts);
+	Out.Triangles.Reserve(N * N * 6 + NumSkirt * 12);
 
 	auto ToByte = [](float V) { return static_cast<uint8>(FMath::Clamp(V, 0.0f, 1.0f) * 255.0f); };
 	for (int32 Y = 0; Y < Side; ++Y)
@@ -1139,21 +1361,28 @@ void ATerrainStreamer::BuildSurface(UProceduralMeshComponent* Mesh, const FVecto
 		for (int32 X = 0; X < Side; ++X)
 		{
 			const FWorldSample& S = At(X, Y);
-			Vertices.Add(FVector(X * Spacing, Y * Spacing, S.Height));
+			float Height = S.Height;
+			if (bMorph)
+			{
+				const float Dist = FVector2D::Distance(MorphCenter, FVector2D(Origin.X + X * Spacing, Origin.Y + Y * Spacing));
+				const float Morph = FMath::Clamp((Dist - MorphStart) / (MorphEnd - MorphStart), 0.0f, 1.0f);
+				Height = FMath::Lerp(Height, CoarseHeight(X, Y), Morph);
+			}
+			Out.Vertices.Add(FVector(X * Spacing, Y * Spacing, Height));
 
 			// Central-difference normal from neighbouring heights.
 			const float DX = At(X + 1, Y).Height - At(X - 1, Y).Height;
 			const float DY = At(X, Y + 1).Height - At(X, Y - 1).Height;
 			const FVector Normal = FVector(-DX, -DY, 2.0f * Spacing).GetSafeNormal();
-			Normals.Add(Normal);
+			Out.Normals.Add(Normal);
 
 			// Material layer weights (see M_Terrain): R sand, G rock, B snow, A forest floor.
 			const float Snow = S.Snow * Smooth(0.5f, 0.72f, Normal.Z);
 			const float Steep = Smooth(0.82f, 0.6f, Normal.Z) * Smooth(200.0f, 800.0f, S.Height);
 			const float Rock = FMath::Max(Steep, S.Rock) * (1.0f - Snow * 0.8f);
-			LayerWeights.Add(FColor(ToByte(S.Sand * (1.0f - Rock)), ToByte(Rock), ToByte(Snow), ToByte(S.Forest)));
-			UV1.Add(FVector2D(S.Dryness, S.Wetness));
-			UV0.Add(FVector2D(X, Y));
+			Out.Colors.Add(FColor(ToByte(S.Sand * (1.0f - Rock)), ToByte(Rock), ToByte(Snow), ToByte(S.Forest)));
+			Out.UV1.Add(FVector2D(S.Dryness, S.Wetness));
+			Out.UV0.Add(FVector2D(X, Y));
 		}
 	}
 
@@ -1166,7 +1395,7 @@ void ATerrainStreamer::BuildSurface(UProceduralMeshComponent* Mesh, const FVecto
 			const int32 BottomRight = BottomLeft + 1;
 			const int32 TopLeft = BottomLeft + Side;
 			const int32 TopRight = TopLeft + 1;
-			Triangles.Append({ BottomLeft, TopLeft, BottomRight, BottomRight, TopLeft, TopRight });
+			Out.Triangles.Append({ BottomLeft, TopLeft, BottomRight, BottomRight, TopLeft, TopRight });
 		}
 	}
 
@@ -1180,21 +1409,21 @@ void ATerrainStreamer::BuildSurface(UProceduralMeshComponent* Mesh, const FVecto
 	Perimeter.Add(0);
 
 	const float SkirtDepth = 6.0f * Spacing;
-	const int32 SkirtStart = Vertices.Num();
+	const int32 SkirtStart = Out.Vertices.Num();
 	for (int32 i = 0; i < NumSkirt; ++i)
 	{
 		// Copy before adding: Add() may reallocate the array the reference points into.
 		const int32 Top = Perimeter[i];
-		const FVector Vertex = Vertices[Top] - FVector(0, 0, SkirtDepth);
-		const FVector Normal = Normals[Top];
-		const FColor Layer = LayerWeights[Top];
-		const FVector2D A = UV0[Top];
-		const FVector2D B = UV1[Top];
-		Vertices.Add(Vertex);
-		Normals.Add(Normal);
-		LayerWeights.Add(Layer);
-		UV0.Add(A);
-		UV1.Add(B);
+		const FVector Vertex = Out.Vertices[Top] - FVector(0, 0, SkirtDepth);
+		const FVector Normal = Out.Normals[Top];
+		const FColor Layer = Out.Colors[Top];
+		const FVector2D A = Out.UV0[Top];
+		const FVector2D B = Out.UV1[Top];
+		Out.Vertices.Add(Vertex);
+		Out.Normals.Add(Normal);
+		Out.Colors.Add(Layer);
+		Out.UV0.Add(A);
+		Out.UV1.Add(B);
 	}
 	for (int32 i = 0; i < NumSkirt; ++i)
 	{
@@ -1203,13 +1432,17 @@ void ATerrainStreamer::BuildSurface(UProceduralMeshComponent* Mesh, const FVecto
 		const int32 A2 = SkirtStart + i;
 		const int32 B2 = SkirtStart + (i + 1) % NumSkirt;
 		// Both windings, so the curtain is visible from either side.
-		Triangles.Append({ A, A2, B, B, A2, B2, A, B, A2, B, B2, A2 });
+		Out.Triangles.Append({ A, A2, B, B, A2, B2, A, B, A2, B, B2, A2 });
 	}
+}
 
+void ATerrainStreamer::ApplySurface(UProceduralMeshComponent* Mesh, const FVector& Origin, FSurfaceData& Data, bool bWithCollision, UMaterialInterface* Material) const
+{
 	Mesh->SetWorldLocation(Origin);
 	const TArray<FVector2D> Empty;
-	Mesh->CreateMeshSection(0, Vertices, Triangles, Normals, UV0, UV1, Empty, Empty, LayerWeights, TArray<FProcMeshTangent>(), bWithCollision);
-	Mesh->SetMaterial(0, TerrainMaterial);
+	Mesh->CreateMeshSection(0, Data.Vertices, Data.Triangles, Data.Normals, Data.UV0, Data.UV1, Empty, Empty, Data.Colors, TArray<FProcMeshTangent>(), bWithCollision);
+	Mesh->SetMaterial(0, Material);
+	Mesh->SetVisibility(true);
 }
 
 void ATerrainStreamer::FPropBatch::Add(EPropPart Part, const FVector& Center, const FRotator& Rotation, const FVector& SizeCm, const FLinearColor& Color, float Glow, ESurface Surface)
@@ -1218,7 +1451,7 @@ void ATerrainStreamer::FPropBatch::Add(EPropPart Part, const FVector& Center, co
 	CustomData[Part].Append({ Color.R, Color.G, Color.B, Glow, static_cast<float>(Surface) });
 }
 
-void ATerrainStreamer::BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps Level)
+void ATerrainStreamer::ComputeProps(const FIntPoint& Coord, EProps Level, FJobResult& Out) const
 {
 	FPropBatch Batch;
 	AddCities(Coord, Batch);
@@ -1238,24 +1471,15 @@ void ATerrainStreamer::BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps 
 
 	for (int32 Part = 0; Part < NumParts; ++Part)
 	{
-		UHierarchicalInstancedStaticMeshComponent*& Component = Chunk.Parts[Part];
 		const TArray<FPropBatch::FInstance>& Instances = Batch.Instances[Part];
-		if (Instances.Num() == 0)
+		if (Instances.Num() == 0 || !PartBounds.IsValidIndex(Part))
 		{
-			if (Component)
-			{
-				Component->ClearInstances();
-				Component->SetVisibility(false);
-				PartPools[Part].Add(Component);
-				Component = nullptr;
-			}
 			continue;
 		}
-
 		// Fit each mesh to the requested size and centre it, whatever its native size and pivot.
-		const FBox Bounds = PartMeshes[Part]->GetBoundingBox();
+		const FBox& Bounds = PartBounds[Part];
 		const FVector MeshSize = Bounds.GetSize().ComponentMax(FVector(1.0));
-		TArray<FTransform> Transforms;
+		TArray<FTransform>& Transforms = Out.Transforms[Part];
 		Transforms.Reserve(Instances.Num());
 		for (const FPropBatch::FInstance& Instance : Instances)
 		{
@@ -1265,21 +1489,19 @@ void ATerrainStreamer::BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps 
 				Transforms.Add(FTransform(Instance.Rotation, Instance.Center, Instance.Size));
 				continue;
 			}
+			// Furniture keeps its real size; Center is where the middle of its base sits on the floor.
+			if (Part >= Furniture0)
+			{
+				const FVector Pivot(Bounds.GetCenter().X, Bounds.GetCenter().Y, Bounds.Min.Z);
+				Transforms.Add(FTransform(Instance.Rotation, Instance.Center - Instance.Rotation.RotateVector(Pivot), FVector::OneVector));
+				continue;
+			}
 			const FVector Scale = Instance.Size / MeshSize;
 			const FVector Location = Instance.Center - Instance.Rotation.RotateVector(Bounds.GetCenter() * Scale);
 			Transforms.Add(FTransform(Instance.Rotation, Location, Scale));
 		}
-
-		if (!Component)
-		{
-			Component = AcquirePart(static_cast<EPropPart>(Part));
-		}
-		// Start without physics; Tick enables it if this chunk is close enough.
-		Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		SetInstances(Component, Transforms, Batch.CustomData[Part]);
+		Out.CustomData[Part] = MoveTemp(Batch.CustomData[Part]);
 	}
-	Chunk.Props = Level;
-	Chunk.bPropCollision = false;
 }
 
 void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch, bool bTreesOnly) const
@@ -1571,13 +1793,28 @@ void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) co
 			const FLinearColor Plaster[] = { FLinearColor(1.6f, 1.5f, 1.3f), FLinearColor(1.7f, 1.65f, 1.55f), FLinearColor(1.5f, 1.3f, 1.0f) };
 			const FLinearColor Roofs[] = { FLinearColor(1.2f, 0.55f, 0.4f), FLinearColor(0.7f, 0.7f, 0.75f), FLinearColor(0.9f, 0.6f, 0.45f) };
 
+			// Lay out every house in the village first (the same way whichever chunk asks), skipping any that
+			// would overlap an earlier one, then build the ones standing in this chunk.
 			const int32 Houses = 6 + FMath::FloorToInt(Rand.Next() * 14.0f);
+			TArray<FVector4> Placed; // x, y, radius, yaw
 			for (int32 i = 0; i < Houses; ++i)
 			{
 				FRandom House{ CX * 131 + i, CY, SeedVillage + 1 };
 				const float Angle = House.Range(0.0f, 2.0f * PI);
 				const float Radius = i == 0 ? 0.0f : 2500.0f + 17000.0f * FMath::Sqrt(House.Next());
 				const FVector Pos = Center + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 0.0);
+				const float Yaw = House.Range(0.0f, 360.0f);
+				const float Footprint = i == 0 ? 1000.0f : 850.0f;
+				bool bOverlaps = false;
+				for (const FVector4& P : Placed)
+				{
+					bOverlaps |= FVector2D::Distance(FVector2D(P.X, P.Y), FVector2D(Pos)) < P.Z + Footprint + 200.0f;
+				}
+				if (bOverlaps)
+				{
+					continue;
+				}
+				Placed.Add(FVector4(Pos.X, Pos.Y, Footprint, Yaw));
 				if (!ChunkContains(Coord, Pos))
 				{
 					continue;
@@ -1587,7 +1824,6 @@ void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) co
 				{
 					continue;
 				}
-				const float Yaw = House.Range(0.0f, 360.0f);
 
 				if (i == 0)
 				{
@@ -1608,90 +1844,42 @@ void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) co
 					continue;
 				}
 
-				const float W = House.Range(700.0f, 1100.0f);
-				const float D = House.Range(550.0f, 850.0f);
-				const bool bTwoStorey = !bAdobe && House.Next() < 0.35f;
-				const float H = bTwoStorey ? House.Range(620.0f, 720.0f) : House.Range(360.0f, 420.0f);
-				FLinearColor Wall = Plaster[FMath::FloorToInt(House.Next() * 3) % 3];
-				ESurface WallSurface = House.Next() < 0.4f ? SurfBrick : SurfConcrete;
-				if (bTimber) { Wall = FLinearColor(0.5f, 0.36f, 0.25f); WallSurface = SurfConcrete; }
-				if (bAdobe) { Wall = FLinearColor(1.5f, 1.2f, 0.85f); WallSurface = SurfConcrete; }
-				if (WallSurface == SurfBrick) { Wall = White; }
-
-				// Everything is laid out in the house's own frame: X along its length, Y across, Z up from the ground.
-				const FRotator Rot(0, Yaw, 0);
-				const FVector Base(Pos.X, Pos.Y, Ground);
-				auto Part = [&](EPropPart Shape, const FVector& Local, const FVector& Size, const FLinearColor& Color, ESurface Surface, float Roll = 0.0f)
+				// A real house: rooms, doors, windows, stairs and furniture (see HouseGen).
+				const HouseGen::EStyle Style = bTimber ? HouseGen::EStyle::Timber
+					: (!bAdobe && House.Next() < 0.4f) ? HouseGen::EStyle::Brick : HouseGen::EStyle::Plaster;
+				const bool bTwoStorey = !bAdobe && House.Next() < 0.5f;
+				const HouseGen::FHouse Plan = HouseGen::Generate(WorldGen::Hash(CX * 131 + i, CY, SeedVillage + 3), Style, bTwoStorey);
+				// Sit the ground floor just above the highest corner of the footprint; the plinth goes down to the lowest.
+				const FRotator Rot(0.0f, Yaw, 0.0f);
+				float High = Ground;
+				for (const FVector2D Corner : { FVector2D(-1, -1), FVector2D(1, -1), FVector2D(-1, 1), FVector2D(1, 1) })
 				{
-					Batch.Add(Shape, Base + Rot.RotateVector(Local), FRotator(0, Yaw, Roll), Size, Color, 0.0f, Surface);
-				};
-				const FLinearColor Stone(1.1f, 1.05f, 0.98f);
-				const FLinearColor Trim(1.8f, 1.8f, 1.75f);
-				const FLinearColor Glass(0.35f, 0.4f, 0.45f);
-				const FLinearColor Wood(0.45f, 0.3f, 0.2f);
-
-				// Stone plinth the house sits on (it also hides uneven ground), then the walls.
-				Part(Cube, FVector(0, 0, -20.0f), FVector(W + 40.0f, D + 40.0f, 110.0f), Stone, SurfRock);
-				Part(Cube, FVector(0, 0, H * 0.5f + 30.0f), FVector(W, D, H), Jitter(Wall, House.Next(), 0.06f), WallSurface);
-
-				// Framed windows on every wall, one row per storey; a panelled door on the front.
-				const int32 Storeys = bTwoStorey ? 2 : 1;
-				const int32 AlongLong = FMath::Max(2, FMath::FloorToInt(W / 280.0f));
-				const int32 AlongShort = FMath::Max(1, FMath::FloorToInt(D / 320.0f));
-				const int32 DoorSlot = AlongLong / 2;
-				auto Window = [&](const FVector& Center, bool bFacingY)
-				{
-					const FVector Out = bFacingY ? FVector(0, FMath::Sign(Center.Y), 0) : FVector(FMath::Sign(Center.X), 0, 0);
-					const FVector FrameSize = bFacingY ? FVector(125, 14, 150) : FVector(14, 125, 150);
-					const FVector GlassSize = bFacingY ? FVector(100, 16, 122) : FVector(16, 100, 122);
-					Part(Cube, Center + Out * 6.0f, FrameSize, bAdobe ? Wood : Trim, SurfConcrete);
-					Part(Cube, Center + Out * 9.0f, GlassSize, Glass, SurfGlass);
-					Part(Cube, Center + Out * 14.0f - FVector(0, 0, 80.0f), bFacingY ? FVector(140, 24, 12) : FVector(24, 140, 12), bAdobe ? Wood : Trim, SurfConcrete);
-				};
-				for (int32 Storey = 0; Storey < Storeys; ++Storey)
-				{
-					const float Z = 30.0f + (Storey + 0.55f) * H / Storeys;
-					for (const float Side : { -1.0f, 1.0f })
-					{
-						for (int32 k = 0; k < AlongLong; ++k)
-						{
-							if (Storey == 0 && Side > 0 && k == DoorSlot)
-							{
-								continue;
-							}
-							Window(FVector(-W * 0.5f + (k + 0.5f) * W / AlongLong, Side * D * 0.5f, Z), true);
-						}
-						for (int32 k = 0; k < AlongShort; ++k)
-						{
-							Window(FVector(Side * W * 0.5f, -D * 0.5f + (k + 0.5f) * D / AlongShort, Z), false);
-						}
-					}
+					const FVector C = FVector(Pos.X, Pos.Y, 0.0) + Rot.RotateVector(FVector(Corner.X * Plan.Width * 0.5f, Corner.Y * Plan.Depth * 0.5f, 0.0f));
+					High = FMath::Max(High, WorldGen::Height(C.X, C.Y));
 				}
-				const float DoorX = -W * 0.5f + (DoorSlot + 0.5f) * W / AlongLong;
-				Part(Cube, FVector(DoorX, D * 0.5f + 6.0f, 30.0f + 110.0f), FVector(120, 14, 230), bAdobe ? Wood : Trim, SurfConcrete);
-				Part(Cube, FVector(DoorX, D * 0.5f + 9.0f, 30.0f + 105.0f), FVector(96, 16, 210), Wood, SurfConcrete);
-				Part(Cube, FVector(DoorX, D * 0.5f + 60.0f, 20.0f), FVector(180, 110, 30), Stone, SurfRock);
-
-				if (bAdobe)
+				const FVector Base(Pos.X, Pos.Y, High + 40.0f);
+				const FLinearColor Wash = bAdobe ? FLinearColor(1.15f, 0.95f, 0.75f) : Jitter(Plaster[FMath::FloorToInt(House.Next() * 3) % 3] * 0.65f, House.Next(), 0.05f);
+				const FQuat HouseQuat = Rot.Quaternion();
+				for (const HouseGen::FPiece& Piece : Plan.Pieces)
 				{
-					// Flat roof with a parapet and roof beams (vigas) poking out of the walls.
-					Part(Cube, FVector(0, 0, H + 30.0f + 25.0f), FVector(W + 20.0f, D + 20.0f, 50.0f), Jitter(Wall, House.Next(), 0.04f), SurfConcrete);
-					const int32 Vigas = FMath::FloorToInt(W / 160.0f);
-					for (int32 k = 0; k < Vigas; ++k)
+					const FVector World = Base + HouseQuat.RotateVector(Piece.Center);
+					const FRotator PieceRot = (HouseQuat * Piece.Rotation.Quaternion()).Rotator();
+					if (Piece.bFurniture)
 					{
-						Part(Cylinder, FVector(-W * 0.5f + (k + 0.5f) * W / Vigas, 0, H - 20.0f), FVector(22, D + 90.0f, 22), Wood, SurfConcrete, 90.0f);
+						Batch.Add(static_cast<EPropPart>(Furniture0 + static_cast<int32>(Piece.Furniture)), World, PieceRot, FVector::OneVector, White);
+						continue;
 					}
-				}
-				else
-				{
-					// Pitched roof with overhanging eaves (a box turned 45 degrees about the ridge), plus a chimney.
-					const float S2 = D / UE_SQRT_2 + 70.0f;
-					const FLinearColor Roof = bTimber ? FLinearColor(0.55f, 0.55f, 0.58f) : Roofs[FMath::FloorToInt(House.Next() * 3) % 3];
-					Part(Cube, FVector(0, 0, H + 30.0f), FVector(W + 100.0f, S2, S2), Roof, SurfSlate, 45.0f);
-					Part(Cube, FVector(0, 0, H + 30.0f), FVector(W + 10.0f, S2 - 20.0f, S2 - 20.0f), Jitter(Wall, House.Next(), 0.06f), WallSurface, 45.0f);
-					const float ChimneyX = (House.Next() < 0.5f ? -1.0f : 1.0f) * W * 0.3f;
-					Part(Cube, FVector(ChimneyX, D * 0.15f, H + 30.0f + D * 0.45f), FVector(70, 70, D * 0.6f), White, SurfBrick);
-					Part(Cube, FVector(ChimneyX, D * 0.15f, H + 30.0f + D * 0.75f), FVector(90, 90, 20), Stone, SurfRock);
+					FVector Size = Piece.Size;
+					FVector Mid = World;
+					// Extend the plinth down to the terrain on sloping ground.
+					if (Piece.Surface == HouseGen::ESurface::Stone && Piece.Center.Z < 0.0f)
+					{
+						const float Extra = High - Ground + 150.0f;
+						Size.Z += Extra;
+						Mid.Z -= Extra * 0.5f;
+					}
+					const FLinearColor Tint = Piece.Surface == HouseGen::ESurface::ExteriorWall ? Wash : White;
+					Batch.Add(static_cast<EPropPart>(BuildSurf0 + static_cast<int32>(Piece.Surface)), Mid, PieceRot, Size, Tint);
 				}
 			}
 		}
@@ -1953,12 +2141,21 @@ UProceduralMeshComponent* ATerrainStreamer::AcquireMesh()
 	return Mesh;
 }
 
-UHierarchicalInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPart Part)
+UInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPart Part)
 {
-	UHierarchicalInstancedStaticMeshComponent* Component = PartPools[Part].Num() > 0 ? PartPools[Part].Pop(EAllowShrinking::No) : nullptr;
+	UInstancedStaticMeshComponent* Component = PartPools[Part].Num() > 0 ? PartPools[Part].Pop(EAllowShrinking::No) : nullptr;
 	if (!Component)
 	{
-		Component = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
+		// Nanite culls and LODs each instance on the GPU, so plain instancing is cheaper there than a
+		// hierarchical component, whose CPU culling tree would have to be rebuilt for every chunk.
+		if (Part >= Scanned0)
+		{
+			Component = NewObject<UInstancedStaticMeshComponent>(this);
+		}
+		else
+		{
+			Component = NewObject<UHierarchicalInstancedStaticMeshComponent>(this);
+		}
 		Component->SetMobility(EComponentMobility::Movable);
 		Component->SetStaticMesh(PartMeshes[Part]);
 		if (PartMaterials[Part])
@@ -1968,7 +2165,7 @@ UHierarchicalInstancedStaticMeshComponent* ATerrainStreamer::AcquirePart(EPropPa
 		// Trunk colliders, rocks and buildings are solid so you can weave between trees; foliage and the
 		// tree wood meshes themselves are not (the colliders stand in for trunks). Vegetation dissolves
 		// in and out smoothly by distance in its materials, so there's no hard cull distance here.
-		if (Part == Bush || Part == IslandBush || Part >= Tree0)
+		if (Part == Bush || Part == IslandBush || Part >= Furniture0 || Part == BuildSurf0 + static_cast<int32>(HouseGen::ESurface::Glass))
 		{
 			Component->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		}
@@ -2011,7 +2208,7 @@ void ATerrainStreamer::ReleaseChunk(FChunk& Chunk)
 	}
 	for (int32 Part = 0; Part < NumParts; ++Part)
 	{
-		if (UHierarchicalInstancedStaticMeshComponent* Component = Chunk.Parts[Part])
+		if (UInstancedStaticMeshComponent* Component = Chunk.Parts[Part])
 		{
 			Component->ClearInstances();
 			Component->SetVisibility(false);

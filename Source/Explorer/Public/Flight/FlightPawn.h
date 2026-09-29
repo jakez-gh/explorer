@@ -40,6 +40,16 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Speed")
 	float MaxFlightSpeed = 40000.0f;
 
+	// Top speed near the ground (cm/s), rising to MaxFlightSpeed by FullSpeedAltitude above it.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Speed")
+	float LowAltitudeMaxSpeed = 9000.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Speed")
+	float LowSpeedAltitude = 1500.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Speed")
+	float FullSpeedAltitude = 30000.0f;
+
 	// >1 gives finer control at low trigger pull.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Speed")
 	float ThrottleCurve = 2.2f;
@@ -162,6 +172,8 @@ private:
 
 	// 0 in the open, 1 pressed against a trunk; smoothed.
 	float Foliage = 0.0f;
+	float SpeedCap = 0.0f;
+	TWeakObjectPtr<class ATerrainStreamer> Streamer;
 	float TargetAltitude = 1000.0f;
 	float VerticalSpeed = 0.0f;
 	float FlightYaw = 0.0f;

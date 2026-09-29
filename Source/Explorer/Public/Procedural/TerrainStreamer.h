@@ -2,10 +2,13 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "Containers/Queue.h"
+#include "Tasks/Task.h"
 #include "TerrainStreamer.generated.h"
 
 class UProceduralMeshComponent;
 class UHierarchicalInstancedStaticMeshComponent;
+class UInstancedStaticMeshComponent;
 class UStaticMeshComponent;
 class UStaticMesh;
 class UMaterialInterface;
@@ -48,7 +51,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
 	int32 CollisionRadius = 2;
 
-	// Milliseconds per frame spent building chunks (at least one chunk is always built).
+	// Milliseconds per frame spent uploading finished chunks to the renderer (generation runs on worker threads).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
 	float BuildBudgetMs = 6.0f;
 
@@ -64,11 +67,23 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Grass")
 	float GrassMaxViewHeight = 25000.0f;
 
+	// Generation jobs allowed on worker threads at once.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
+	int32 MaxJobsInFlight = 10;
+
+	// How far ahead (seconds of travel) streaming prioritises along the direction of flight.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Terrain|Streaming")
+	float LookAheadSeconds = 2.5f;
+
+	// Near chunks still waiting to be built, 0..1 (1 = badly behind). The flight pawn eases off when high.
+	float GetStreamingBacklog() const { return Backlog; }
+
 	// Terrain surface height in world space at a world XY position.
 	UFUNCTION(BlueprintCallable, Category = "Terrain")
 	float GetHeightAtLocation(FVector2D WorldXY) const;
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void Tick(float DeltaTime) override;
 
 	// Landmark placement, shared by generation and the -BiomeReport finder. Each returns false if the
@@ -95,7 +110,9 @@ private:
 		Bush,
 		Trunk, // invisible collider around tree trunks
 		IslandBush, // foliage on floating islands, which never fades with distance
-		Tree0, Tree1, Tree2, Tree3, Tree4, Tree5, Tree6, Tree7, // runtime-built tree wood meshes
+		BuildSurf0, // house walls, floors, roofs... one per HouseGen::ESurface, photoscanned materials
+		Furniture0 = BuildSurf0 + 11, // one per HouseGen::EFurniture, CC0 scanned furniture
+		Tree0 = Furniture0 + 17, Tree1, Tree2, Tree3, Tree4, Tree5, Tree6, Tree7, // runtime-built tree wood meshes
 		IslandTree, // broadleaf wood that never fades, for floating islands
 		Island0, Island1, Island2, Island3, // runtime-built floating island meshes
 		Scanned0, // photoscanned Megascans trees (Nanite), loaded if the packs are installed
@@ -168,12 +185,49 @@ private:
 		UProceduralMeshComponent* Mesh = nullptr;
 		// Roads and trails laid on the terrain (full-detail chunks only).
 		UProceduralMeshComponent* PathMesh = nullptr;
-		UHierarchicalInstancedStaticMeshComponent* Parts[NumParts] = {};
+		UInstancedStaticMeshComponent* Parts[NumParts] = {};
 		int32 Step = 0;
 		bool bHasCollision = false;
 		// Whether this chunk's solid props (trunks, rocks, buildings) currently collide.
 		bool bPropCollision = false;
 		EProps Props = EProps::None;
+		// Chunk the viewer was in when this chunk's terrain was built (for geomorph refreshes).
+		FIntPoint BuiltCenter = FIntPoint(MAX_int32, MAX_int32);
+	};
+
+	/** Terrain surface arrays, built off the game thread. */
+	struct FSurfaceData
+	{
+		TArray<FVector> Vertices;
+		TArray<FVector> Normals;
+		TArray<FVector2D> UV0;
+		TArray<FVector2D> UV1;
+		TArray<FColor> Colors;
+		TArray<int32> Triangles;
+	};
+
+	enum class EJobKind : uint8
+	{
+		Chunk,
+		Far,
+		Grass,
+	};
+
+	/** A finished background job, waiting to be uploaded on the game thread. */
+	struct FJobResult
+	{
+		EJobKind Kind = EJobKind::Chunk;
+		FIntPoint Coord;
+		int32 Step = 0;
+		bool bCollision = false;
+		EProps Props = EProps::None;
+		FIntPoint BuiltCenter;
+		bool bSurface = false;
+		bool bProps = false;
+		FSurfaceData Surface;
+		FSurfaceData Paths;
+		TArray<FTransform> Transforms[NumParts];
+		TArray<float> CustomData[NumParts];
 	};
 
 	/** Instances collected for one chunk before they're pushed to its components. */
@@ -196,18 +250,24 @@ private:
 	FIntPoint WorldToChunk(const FVector& Location) const;
 	int32 StepForDistance(float DistanceInChunks) const;
 
-	void BuildTerrain(const FIntPoint& Coord, FChunk& Chunk, int32 Step, bool bWithCollision);
-	// Builds an N x N quad terrain patch with skirts at Origin (its Z offsets the whole patch).
-	void BuildSurface(UProceduralMeshComponent* Mesh, const FVector& Origin, int32 N, float Spacing, bool bWithCollision) const;
+	// Computes an N x N quad terrain patch with skirts at Origin (its Z offsets the whole patch). Vertices
+	// between MorphStart and MorphEnd (world distance from MorphCenter) blend towards the next-coarser
+	// grid, so each detail ring meets the next without a visible step. Thread safe.
+	void ComputeSurface(FSurfaceData& Out, const FVector& Origin, int32 N, float Spacing, const FVector2D& MorphCenter = FVector2D::ZeroVector, float MorphStart = 0.0f, float MorphEnd = 0.0f) const;
+	void ApplySurface(UProceduralMeshComponent* Mesh, const FVector& Origin, FSurfaceData& Data, bool bWithCollision, UMaterialInterface* Material) const;
+	void ComputePaths(const FIntPoint& Coord, FSurfaceData& Out) const;
+	void ComputeProps(const FIntPoint& Coord, EProps Level, FJobResult& Out) const;
+	void ComputeGrassTile(const FIntPoint& Tile, TArray<FTransform>& Transforms, TArray<float>& Data) const;
+	void ApplyChunk(FJobResult& Result, const FIntPoint& Center);
+	// Ring edge (in chunks) where a chunk of this step hands over to the next-coarser one.
+	float RingEnd(int32 Step) const;
+	void LaunchJob(TFunction<void(FJobResult&)>&& Work, EJobKind Kind, const FIntPoint& Coord);
 	void UpdateFarTerrain(const FIntPoint& Center, double Deadline);
-	void BuildPaths(const FIntPoint& Coord, FChunk& Chunk);
 	// Height of the rendered full-detail terrain surface (matches its triangles exactly).
 	float SurfaceHeight(double X, double Y) const;
 	void UpdateGrass(const FVector& ViewLocation, double Deadline);
-	void BuildGrassTile(const FIntPoint& Tile, UHierarchicalInstancedStaticMeshComponent* Component) const;
 	UStaticMesh* CreateGrassClumpMesh();
-	static void SetInstances(UHierarchicalInstancedStaticMeshComponent* Component, const TArray<FTransform>& Transforms, const TArray<float>& CustomData);
-	void BuildProps(const FIntPoint& Coord, FChunk& Chunk, EProps Level);
+	static void SetInstances(UInstancedStaticMeshComponent* Component, const TArray<FTransform>& Transforms, const TArray<float>& CustomData);
 	void AddVegetation(const FIntPoint& Coord, FPropBatch& Batch, bool bTreesOnly) const;
 	void AddVillages(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddStoneCircles(const FIntPoint& Coord, FPropBatch& Batch) const;
@@ -219,7 +279,7 @@ private:
 
 	void ReleaseChunk(FChunk& Chunk);
 	UProceduralMeshComponent* AcquireMesh();
-	UHierarchicalInstancedStaticMeshComponent* AcquirePart(EPropPart Part);
+	UInstancedStaticMeshComponent* AcquirePart(EPropPart Part);
 
 	FTreeTemplate TreeTemplates[NumTreeVariants];
 
@@ -230,6 +290,18 @@ private:
 	TObjectPtr<UMaterialInterface> PathMaterial;
 
 	TMap<FIntPoint, FChunk> Chunks;
+
+	// Background generation.
+	TQueue<TSharedPtr<FJobResult, ESPMode::ThreadSafe>, EQueueMode::Mpsc> Results;
+	TArray<UE::Tasks::FTask> Tasks;
+	TSet<FIntPoint> ChunkJobs;
+	TSet<FIntPoint> FarJobs;
+	TSet<FIntPoint> GrassJobs;
+	FVector LastViewLocation = FVector::ZeroVector;
+	float Backlog = 0.0f;
+	FVector ViewVelocity = FVector::ZeroVector;
+	// Bounds of each part's mesh, cached so workers can size instances without touching UObjects.
+	TArray<FBox> PartBounds;
 	TMap<FIntPoint, UProceduralMeshComponent*> FarTiles;
 	TMap<FIntPoint, UHierarchicalInstancedStaticMeshComponent*> GrassTiles;
 	TArray<UHierarchicalInstancedStaticMeshComponent*> GrassPool;
@@ -257,9 +329,9 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UProceduralMeshComponent>> MeshPool;
 
-	TArray<UHierarchicalInstancedStaticMeshComponent*> PartPools[NumParts];
+	TArray<UInstancedStaticMeshComponent*> PartPools[NumParts];
 
 	// Every prop component ever created, pooled or live; keeps them referenced for GC.
 	UPROPERTY(Transient)
-	TArray<TObjectPtr<UHierarchicalInstancedStaticMeshComponent>> AllParts;
+	TArray<TObjectPtr<UInstancedStaticMeshComponent>> AllParts;
 };
