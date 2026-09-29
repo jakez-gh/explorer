@@ -2,6 +2,7 @@
 #include "Procedural/WorldGen.h"
 #include "Procedural/HouseGen.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/AssetData.h"
 #include "ProceduralMeshComponent.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -723,7 +724,7 @@ void ATerrainStreamer::Tick(float DeltaTime)
 	LastViewLocation = ViewLocation;
 	const float ChunkSize = ChunkWorldSize();
 	FVector2D Ahead = FVector2D(ViewVelocity) * LookAheadSeconds / ChunkSize;
-	Ahead = Ahead.GetClampedToMaxSize(6.0f);
+	if (Ahead.Size() > 6.0f) { Ahead = Ahead.GetSafeNormal() * 6.0f; }
 	const FVector2D ViewChunk = FVector2D(ViewLocation) / ChunkSize;
 	const FVector2D Predicted = ViewChunk + Ahead;
 	const FVector2D Facing = FVector2D(ViewRotation.Vector()).GetSafeNormal();

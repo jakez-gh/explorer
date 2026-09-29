@@ -412,7 +412,7 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys)
 	B.Box(ESurface::InteriorWall, FVector(-HX, -HY, Top), FVector(HX, HY, Top + SlabThickness));
 	const float Pitch = 38.0f;
 	const float RiseH = HY * FMath::Tan(FMath::DegreesToRadians(Pitch));
-	const int32 Courses = 8;
+	const int32 Courses = 24;
 	for (int32 c = 0; c < Courses; ++c)
 	{
 		const float Z0 = Top + SlabThickness + c * RiseH / Courses;
@@ -430,7 +430,7 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys)
 		P.Surface = RoofSurface;
 		P.Center = FVector(0.0f, Sy * HY * 0.5f, Top + SlabThickness + RiseH * 0.5f + 12.0f);
 		P.Size = FVector(W + 80.0f, Slope, 14.0f);
-		P.Rotation = FRotator(0.0f, 0.0f, -Sy * Pitch);
+		P.Rotation = FRotator(0.0f, 0.0f, Sy * Pitch);
 		House.Pieces.Add(P);
 	}
 	// Chimney.

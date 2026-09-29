@@ -31,6 +31,8 @@ def import_files(files, dest):
 def import_textures():
     for folder in sorted((ROOT / "Textures").iterdir()):
         dest = f"{DEST}/Textures/{folder.name}"
+        if unreal.EditorAssetLibrary.does_directory_have_assets(dest):
+            continue
         for path in import_files(sorted(folder.glob("*.jpg")), dest):
             tex = unreal.load_asset(path)
             if not isinstance(tex, unreal.Texture2D):
@@ -52,6 +54,8 @@ def import_models():
         if not gltf:
             continue
         dest = f"{DEST}/Models/{folder.name}"
+        if unreal.EditorAssetLibrary.does_directory_have_assets(dest):
+            continue  # already imported (re-runs resume after an out-of-memory stop)
         paths = import_files([gltf], dest)
         meshes = 0
         for path in paths:
