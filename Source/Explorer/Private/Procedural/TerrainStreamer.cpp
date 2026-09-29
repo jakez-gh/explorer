@@ -2305,6 +2305,41 @@ void ATerrainStreamer::AddDiscoveries(const FIntPoint& Coord, FPropBatch& Batch)
 
 namespace
 {
+	// How ordinary Midwestern houses are painted: vinyl siding in muted whites, creams, greys, tans, sages and pale blues, white or
+	// dark trim, and asphalt-shingle roofs in charcoal, brown and grey (never red clay tile).
+	void RealHouseLook(const HouseGen::FPiece& P, uint32 Seed, float HalfW, float HalfD, HouseGen::ESurface& Surface, FLinearColor& Tint, bool& bOverride)
+	{
+		static const FLinearColor Siding[] = { FLinearColor(1.7f, 1.7f, 1.65f), FLinearColor(1.5f, 1.4f, 1.1f), FLinearColor(1.15f, 1.18f, 1.22f), FLinearColor(1.3f, 1.12f, 0.88f),
+			FLinearColor(0.95f, 1.15f, 0.9f), FLinearColor(0.85f, 1.1f, 1.5f), FLinearColor(1.5f, 1.4f, 0.95f), FLinearColor(1.0f, 1.0f, 1.0f) };
+		static const FLinearColor Shingle[] = { FLinearColor(0.32f, 0.31f, 0.30f), FLinearColor(0.20f, 0.20f, 0.21f), FLinearColor(0.30f, 0.23f, 0.18f), FLinearColor(0.42f, 0.40f, 0.36f) };
+		static const FLinearColor Trim[] = { FLinearColor(2.4f, 2.4f, 2.3f), FLinearColor(2.4f, 2.4f, 2.3f), FLinearColor(0.35f, 0.5f, 0.38f), FLinearColor(0.15f, 0.15f, 0.16f), FLinearColor(0.7f, 0.5f, 0.35f) };
+		bOverride = false;
+		if (P.bTinted) return;
+		switch (P.Surface)
+		{
+		case HouseGen::ESurface::ExteriorWall:
+			Tint = Siding[Seed % UE_ARRAY_COUNT(Siding)];
+			bOverride = true;
+			break;
+		case HouseGen::ESurface::ClayRoof:
+		case HouseGen::ESurface::SlateRoof:
+			Surface = HouseGen::ESurface::SlateRoof;
+			Tint = Shingle[(Seed >> 4) % UE_ARRAY_COUNT(Shingle)];
+			bOverride = true;
+			break;
+		case HouseGen::ESurface::Wood:
+			// Trim and shutters on the outside of the house only; stairs and furniture stay wood.
+			if (!(FMath::Abs(P.Center.X) < HalfW - 30.0f && FMath::Abs(P.Center.Y) < HalfD - 30.0f) && P.Center.Z > -10.0f)
+			{
+				Tint = Trim[(Seed >> 8) % UE_ARRAY_COUNT(Trim)];
+				bOverride = true;
+			}
+			break;
+		default:
+			break;
+		}
+	}
+
 	// A house seen from outside: walls with windows, roof, porch. Drops furniture, floors, carpet and interior partitions.
 	bool KeepInShell(const HouseGen::FPiece& P, float HalfW, float HalfD)
 	{
@@ -2459,8 +2494,12 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 					Size.Z += Extra;
 					Mid.Z -= Extra * 0.5f;
 				}
-				Batch.Add(static_cast<EPropPart>(BuildSurf0 + static_cast<int32>(Piece.Surface)), Mid, PieceRot, Size,
-					Piece.Surface == HouseGen::ESurface::ExteriorWall ? Wash : White);
+				HouseGen::ESurface Surface = Piece.Surface;
+				FLinearColor Tint = Piece.Surface == HouseGen::ESurface::ExteriorWall ? Wash : White;
+				bool bLook = false;
+				if (!bChurch) RealHouseLook(Piece, Seed, Plan.Width * 0.5f, Plan.Depth * 0.5f, Surface, Tint, bLook);
+				if (Piece.bTinted) Tint = Piece.Tint;
+				Batch.Add(static_cast<EPropPart>(BuildSurf0 + static_cast<int32>(Surface)), Mid, PieceRot, Size, Tint);
 			}
 			continue;
 		}
@@ -2492,7 +2531,7 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 			High = FMath::Max(High, WorldGen::Height(C.X, C.Y));
 		}
 		const int32 Floors = (Lot->Seed % 10) < 4 ? 2 : 1;
-		const HouseGen::EStyle Style = (Lot->Seed & 3) == 0 ? HouseGen::EStyle::Brick : HouseGen::EStyle::Plaster;
+		const HouseGen::EStyle Style = (Lot->Seed % 5) == 0 ? HouseGen::EStyle::Brick : HouseGen::EStyle::Plaster;
 		const FQuat Quat = FRotator(0.0f, Lot->Yaw, 0.0f).Quaternion();
 		const FVector Base(Lot->Pos.X, Lot->Pos.Y, High + 40.0f);
 		const FLinearColor Wash = Washes[Lot->Seed % UE_ARRAY_COUNT(Washes)];
@@ -2577,8 +2616,14 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 					if (Piece.Surface == HouseGen::ESurface::ExteriorWall) Tint = FLinearColor(0.42f, 0.62f, 1.25f);
 					else if (Piece.Surface == HouseGen::ESurface::InteriorWall) Tint = FLinearColor(1.25f, 1.02f, 0.78f);
 				}
+				HouseGen::ESurface Surface = Piece.Surface;
+				if (!Lot->bFamilyHouse)
+				{
+					bool bLook = false;
+					RealHouseLook(Piece, Lot->Seed, Plan.Width * 0.5f, Plan.Depth * 0.5f, Surface, Tint, bLook);
+				}
 				if (Piece.bTinted) Tint = Piece.Tint;
-				Batch.Add(static_cast<EPropPart>(BuildSurf0 + static_cast<int32>(Piece.Surface)), Mid, PieceRot, Size, Tint);
+				Batch.Add(static_cast<EPropPart>(BuildSurf0 + static_cast<int32>(Surface)), Mid, PieceRot, Size, Tint);
 			}
 			// The single tree in the back yard.
 			if (Lot->bFamilyHouse && NumLoadedScanned > 0 && MatureSlots.Num() > 0)
