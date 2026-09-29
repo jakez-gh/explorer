@@ -465,7 +465,26 @@ namespace RealPlace
 			}
 			Block.Sort([](const FVector2D& A, const FVector2D& B) { return A.Y > B.Y; });
 			UE_LOG(LogTemp, Display, TEXT("RealPlace: %d house lots; %d on Avenue E between 17th and 18th"), Place.Lots.Num(), Block.Num());
-			Place.Landmarks.Add({ TEXT("1733 Avenue E"), Block.Num() > 0 ? Block[FMath::Min(16, Block.Num() - 1)] : ToWorld(-1497.0, 745.0) });
+			const FVector2D Spot = Block.Num() > 0 ? Block[FMath::Min(16, Block.Num() - 1)] : ToWorld(-1497.0, 745.0);
+			Place.Landmarks.Add({ TEXT("1733 Avenue E"), Spot });
+			// That lot becomes the hand-planned house.
+			int32 Nearest = INDEX_NONE;
+			double NearestD = 1500.0;
+			for (int32 k = 0; k < Place.Lots.Num(); ++k)
+			{
+				const double Dist = FVector2D::Distance(Place.Lots[k].Pos, Spot);
+				if (Dist < NearestD)
+				{
+					NearestD = Dist;
+					Nearest = k;
+				}
+			}
+			if (Nearest != INDEX_NONE)
+			{
+				Place.Lots[Nearest].bBungalow1733 = true;
+				Place.Lots[Nearest].Width = 850.0f;
+				Place.Lots[Nearest].Depth = 975.0f;
+			}
 		}
 		for (const TSharedPtr<FJsonValue>& V : Root->GetArrayField(TEXT("places")))
 		{

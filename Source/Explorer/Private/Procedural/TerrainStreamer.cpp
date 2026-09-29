@@ -2471,7 +2471,7 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 		const FLinearColor Wash = Washes[Lot->Seed % UE_ARRAY_COUNT(Washes)];
 		if (Level == EProps::Full)
 		{
-			const HouseGen::FHouse Plan = HouseGen::Generate(Lot->Seed, Style, Floors > 1, W, D, false, Floors);
+			const HouseGen::FHouse Plan = Lot->bBungalow1733 ? HouseGen::GenerateBungalow1733() : HouseGen::Generate(Lot->Seed, Style, Floors > 1, W, D, false, Floors);
 			for (const HouseGen::FPiece& Piece : Plan.Pieces)
 			{
 				const FVector World = Base + Quat.RotateVector(Piece.Center);

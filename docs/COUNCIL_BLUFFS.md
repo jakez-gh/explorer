@@ -18,3 +18,6 @@ Goal: a faithful, photoreal recreation of Council Bluffs the way the player reme
 
 ## Limits
 No historical imagery is available offline; current OSM is the baseline and period details must come from photos/records the player provides or public archives.
+
+## 1733 Avenue E (hero house)
+Public listing data (RealtyTrac/Zillow via web search): single-storey, built 1920, 3 bed / 1 bath, gable asphalt roof, fireplace, lot 6,534 sq ft, ~880 sq ft main floor (some listings say 1,540 sq ft total). `HouseGen::GenerateBungalow1733` is a hand-planned layout (front room + dining, parents' room with crib, boys' bunk room, girls' room, kitchen, bath) furnished for a family of seven and a cat. Photos/blueprints weren't retrievable (Zillow returns 403); real photos from the player would improve it.

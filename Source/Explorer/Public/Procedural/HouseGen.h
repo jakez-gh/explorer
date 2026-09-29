@@ -68,4 +68,7 @@ namespace HouseGen
 
 	// A village church with a nave, pews, altar, and a bell tower over the entrance. Front door on +Y.
 	FHouse GenerateChurch(uint32 Seed, EStyle Style);
+
+	// 1733 Avenue E, Council Bluffs: a hand-planned 1920 bungalow, furnished for a family of seven and a cat.
+	FHouse GenerateBungalow1733();
 }
