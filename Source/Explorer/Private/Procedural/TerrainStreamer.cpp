@@ -806,7 +806,7 @@ void ATerrainStreamer::Tick(float DeltaTime)
 			const float Dist = FMath::Sqrt(static_cast<float>(DistSq));
 			const int32 Step = StepForDistance(Dist);
 			const bool bCollision = DistSq <= CollisionRadius * CollisionRadius;
-			const EProps Props = DistSq <= DetailRadius * DetailRadius ? EProps::Full
+			const EProps Props = DistSq <= 0 ? EProps::Near : DistSq <= 4 ? EProps::Shell : DistSq <= DetailRadius * DetailRadius ? EProps::Full
 				: (NumLoadedScanned > 0 && DistSq <= TreeRadius * TreeRadius) ? EProps::Trees : EProps::Landmarks;
 
 			const FChunk* Existing = Chunks.Find(Coord);
@@ -1498,7 +1498,7 @@ void ATerrainStreamer::ComputeProps(const FIntPoint& Coord, EProps Level, FJobRe
 	{
 		AddVegetation(Coord, Batch, true);
 	}
-	if (Level == EProps::Full)
+	if (Level >= EProps::Full)
 	{
 		AddVegetation(Coord, Batch, false);
 		if (!RealPlace::Covers(ChunkMin2, ChunkMin2 + FVector2D(ChunkWorldSize()), 250000.0))
@@ -2303,6 +2303,27 @@ void ATerrainStreamer::AddDiscoveries(const FIntPoint& Coord, FPropBatch& Batch)
 	});
 }
 
+namespace
+{
+	// A house seen from outside: walls with windows, roof, porch. Drops furniture, floors, carpet and interior partitions.
+	bool KeepInShell(const HouseGen::FPiece& P, float HalfW, float HalfD)
+	{
+		if (P.bFurniture) return false;
+		switch (P.Surface)
+		{
+		case HouseGen::ESurface::Carpet:
+		case HouseGen::ESurface::PlankFloor:
+		case HouseGen::ESurface::TileFloor:
+			return false;
+		case HouseGen::ESurface::InteriorWall:
+			// Keep only the inner skin of exterior walls (near the perimeter), not room partitions.
+			return FMath::Abs(FMath::Abs(P.Center.X) - HalfW) < 40.0f || FMath::Abs(FMath::Abs(P.Center.Y) - HalfD) < 40.0f;
+		default:
+			return true;
+		}
+	}
+}
+
 void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batch, EProps Level) const
 {
 	const FVector2D Min(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize());
@@ -2415,13 +2436,14 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 		const FQuat Quat = FRotator(0.0f, Yaw, 0.0f).Quaternion();
 		const FVector Base(Centre2.X, Centre2.Y, High + 40.0f);
 		const bool bDetailed = W * D <= 1.2e7f;
-		if (Level == EProps::Full && (bDetailed || bChurch))
+		if (Level >= EProps::Shell && (bDetailed || bChurch))
 		{
 			const HouseGen::FHouse Plan = bChurch ? HouseGen::GenerateChurch(Seed, Style)
 				: HouseGen::Generate(Seed, Style, Floors > 1, W, D, bBig, Floors);
 			const FLinearColor Wash = Washes[Seed % UE_ARRAY_COUNT(Washes)];
 			for (const HouseGen::FPiece& Piece : Plan.Pieces)
 			{
+				if (Level != EProps::Near && !KeepInShell(Piece, Plan.Width * 0.5f, Plan.Depth * 0.5f)) continue;
 				const FVector World = Base + Quat.RotateVector(Piece.Center);
 				const FRotator PieceRot = (Quat * Piece.Rotation.Quaternion()).Rotator();
 				if (Piece.bFurniture)
@@ -2474,7 +2496,7 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 		const FQuat Quat = FRotator(0.0f, Lot->Yaw, 0.0f).Quaternion();
 		const FVector Base(Lot->Pos.X, Lot->Pos.Y, High + 40.0f);
 		const FLinearColor Wash = Washes[Lot->Seed % UE_ARRAY_COUNT(Washes)];
-		if (Level == EProps::Full)
+		if (Level >= EProps::Shell || (Lot->bFamilyHouse && Level >= EProps::Full))
 		{
 			const HouseGen::FHouse Plan = Lot->bFamilyHouse ? HouseGen::GenerateFamilyHouse1719() : HouseGen::Generate(Lot->Seed, Style, Floors > 1, W, D, false, Floors);
 			if (Lot->bFamilyHouse)
@@ -2531,6 +2553,8 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 			}
 			for (const HouseGen::FPiece& Piece : Plan.Pieces)
 			{
+				// Only the viewer's own chunk gets furnished interiors (the family's house always does); the rest are shells.
+				if (Level != EProps::Near && !Lot->bFamilyHouse && !KeepInShell(Piece, Plan.Width * 0.5f, Plan.Depth * 0.5f)) continue;
 				const FVector World = Base + Quat.RotateVector(Piece.Center);
 				const FRotator PieceRot = (Quat * Piece.Rotation.Quaternion()).Rotator();
 				if (Piece.bFurniture)

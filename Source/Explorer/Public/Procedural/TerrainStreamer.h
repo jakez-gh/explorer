@@ -180,7 +180,9 @@ private:
 		None,
 		Landmarks,
 		Trees, // landmarks plus scanned trees (cheap with Nanite), for the middle distance
-		Full,
+		Full,  // plus trees, villages and house exteriors (real-place houses as empty shells)
+		Shell, // within two chunks: real-place houses get walls, windows and roofs (no rooms)
+		Near,  // plus furnished interiors: only the chunk the viewer is in
 	};
 
 	// Loaded scanned trees: height (cm) per slot; 0 if not available.

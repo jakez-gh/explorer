@@ -64,6 +64,9 @@ namespace HouseGen
 		float Width = 0.0f;
 		float Depth = 0.0f;
 		float Height = 0.0f; // ridge height above the ground floor
+		// Clear zones (x0, y0, x1, y1, floorZ) in front of every doorway; furniture is never left inside them.
+		TArray<FVector4> Doorways;
+		TArray<float> DoorwayZ;
 	};
 
 	// Seed picks size, style and layout. Footprint is roughly Width x Depth (cm).

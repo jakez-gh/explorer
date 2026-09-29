@@ -122,6 +122,14 @@ namespace
 				Emit(Cursor, A, Z0, Z1);
 				Emit(A, B, Z0, Z0 + O.Bottom);   // below a window
 				Emit(A, B, Z0 + O.Top, Z1);       // lintel
+				if (!O.bWindow)
+				{
+					// Keep 90 cm clear on both sides of every door.
+					const float Clear = 90.0f;
+					if (W.bAlongX) House.Doorways.Add(FVector4(A, W.Fixed - Clear, B, W.Fixed + Clear));
+					else House.Doorways.Add(FVector4(W.Fixed - Clear, A, W.Fixed + Clear, B));
+					House.DoorwayZ.Add(Z0);
+				}
 				// Frame and glass.
 				const float Frame = 8.0f;
 				if (O.bWindow)
@@ -165,6 +173,80 @@ namespace
 			}
 		}
 	};
+
+
+	// Footprint (cm, model axes X by Y) of each scanned furniture model, from the loaded meshes.
+	FVector2D FootprintOf(EFurniture F)
+	{
+		static const FVector2D Sizes[] = { {157,66},{85,77},{154,97},{137,58},{205,115},{43,58},{50,61},{119,55},{202,65},{149,204},{50,50},{86,44},{49,3},{100,26},{32,5},{117,134},{43,43} };
+		return Sizes[static_cast<int32>(F)];
+	}
+
+	bool RectsOverlap(FVector2D CA, float YawA, FVector2D HA, FVector2D CB, float YawB, FVector2D HB)
+	{
+		auto Corners = [](FVector2D C, float Yaw, FVector2D H, FVector2D Out[4])
+		{
+			const float Cs = FMath::Cos(FMath::DegreesToRadians(Yaw)), Sn = FMath::Sin(FMath::DegreesToRadians(Yaw));
+			const FVector2D Ax(Cs, Sn), Ay(-Sn, Cs);
+			Out[0] = C + Ax * H.X + Ay * H.Y; Out[1] = C - Ax * H.X + Ay * H.Y; Out[2] = C - Ax * H.X - Ay * H.Y; Out[3] = C + Ax * H.X - Ay * H.Y;
+		};
+		FVector2D PA[4], PB[4];
+		Corners(CA, YawA, HA, PA);
+		Corners(CB, YawB, HB, PB);
+		const FVector2D Axes[4] = { PA[0] - PA[1], PA[0] - PA[3], PB[0] - PB[1], PB[0] - PB[3] };
+		for (const FVector2D& A0 : Axes)
+		{
+			const FVector2D Ax = A0.GetSafeNormal();
+			float MinA = 1e9f, MaxA = -1e9f, MinB = 1e9f, MaxB = -1e9f;
+			for (int32 k = 0; k < 4; ++k)
+			{
+				const float DA = FVector2D::DotProduct(PA[k], Ax), DB = FVector2D::DotProduct(PB[k], Ax);
+				MinA = FMath::Min(MinA, DA); MaxA = FMath::Max(MaxA, DA); MinB = FMath::Min(MinB, DB); MaxB = FMath::Max(MaxB, DB);
+			}
+			if (MaxA < MinB + 1.0f || MaxB < MinA + 1.0f) return false;
+		}
+		return true;
+	}
+
+	// Drop any piece of furniture that would sit inside another, poke through a wall or block a doorway.
+	void PruneFurniture(FHouse& House)
+	{
+		struct FKept { FVector2D C; float Yaw; FVector2D H; float Z; };
+		TArray<FKept> Kept;
+		TArray<FPiece> Out;
+		for (const FPiece& P : House.Pieces)
+		{
+			if (!P.bFurniture) { Out.Add(P); continue; }
+			const FVector2D Foot = FootprintOf(P.Furniture);
+			const bool bWallHung = P.Furniture == EFurniture::Mirror || P.Furniture == EFurniture::Clock || P.Furniture == EFurniture::CeilingLamp || P.Furniture == EFurniture::Shelf;
+			if (bWallHung) { Out.Add(P); continue; }
+			const FVector2D C(P.Center.X, P.Center.Y);
+			const FVector2D H = Foot * 0.5f;
+			bool bOk = true;
+			for (const FKept& K : Kept)
+			{
+				if (FMath::Abs(K.Z - P.Center.Z) < 150.0f && RectsOverlap(C, P.Rotation.Yaw, H, K.C, K.Yaw, K.H)) { bOk = false; break; }
+			}
+			for (int32 d = 0; bOk && d < House.Doorways.Num(); ++d)
+			{
+				const FVector4& D = House.Doorways[d];
+				if (FMath::Abs(House.DoorwayZ[d] - P.Center.Z) < 150.0f && RectsOverlap(C, P.Rotation.Yaw, H, FVector2D((D.X + D.Z) * 0.5f, (D.Y + D.W) * 0.5f), 0.0f, FVector2D((D.Z - D.X) * 0.5f, (D.W - D.Y) * 0.5f))) bOk = false;
+			}
+			for (const FPiece& W : House.Pieces)
+			{
+				if (!bOk) break;
+				if (W.bFurniture || W.Size.Z < 150.0f || FMath::Min(W.Size.X, W.Size.Y) > 40.0f) continue;                 // thin, tall pieces are walls
+				if (P.Center.Z + 100.0f < W.Center.Z - W.Size.Z * 0.5f || P.Center.Z > W.Center.Z + W.Size.Z * 0.5f) continue; // other floor
+				if (RectsOverlap(C, P.Rotation.Yaw, H, FVector2D(W.Center.X, W.Center.Y), W.Rotation.Yaw, FVector2D(W.Size.X, W.Size.Y) * 0.5f)) bOk = false;
+			}
+			if (bOk)
+			{
+				Kept.Add({ C, static_cast<float>(P.Rotation.Yaw), H, static_cast<float>(P.Center.Z) });
+				Out.Add(P);
+			}
+		}
+		House.Pieces = Out;
+	}
 
 	// Recursive split into rooms; every split becomes an interior wall with one doorway.
 	void Split(const FRect& R, FRand& Rand, int32 Depth, TArray<FRect>& Rooms, TArray<FWall>& Walls)
@@ -258,17 +340,20 @@ namespace
 			AlongWall(EFurniture::KitchenCabinet, S, 0.75f, 10.0f);
 			AlongWall(EFurniture::Cupboard, (S + 1) % 4, 0.5f, 10.0f);
 			B.Furniture(EFurniture::DiningTable, FVector(M.X, M.Y, Z), 0.0f);
-			B.Furniture(EFurniture::DiningChair, FVector(M.X, M.Y - 70.0f, Z), 90.0f);
-			B.Furniture(EFurniture::DiningChair, FVector(M.X, M.Y + 70.0f, Z), -90.0f);
+			// Chairs sit outside the 205 x 115 cm table, tucked to its long sides.
+			B.Furniture(EFurniture::DiningChair, FVector(M.X - 45.0f, M.Y - 92.0f, Z), 90.0f);
+			B.Furniture(EFurniture::DiningChair, FVector(M.X + 45.0f, M.Y - 92.0f, Z), 90.0f);
+			B.Furniture(EFurniture::DiningChair, FVector(M.X - 45.0f, M.Y + 92.0f, Z), -90.0f);
+			B.Furniture(EFurniture::DiningChair, FVector(M.X + 45.0f, M.Y + 92.0f, Z), -90.0f);
 			break;
 		case ERoom::Dining:
 			B.Furniture(EFurniture::DiningTable, FVector(M.X, M.Y, Z), 0.0f);
-			for (int32 i = 0; i < 4; ++i)
-			{
-				const float A = i * 90.0f;
-				const FVector2D O = FVector2D(FMath::Cos(FMath::DegreesToRadians(A)), FMath::Sin(FMath::DegreesToRadians(A))) * 85.0f;
-				B.Furniture(EFurniture::DiningChair, FVector(M.X + O.X, M.Y + O.Y, Z), A + 180.0f);
-			}
+			B.Furniture(EFurniture::DiningChair, FVector(M.X - 50.0f, M.Y - 92.0f, Z), 90.0f);
+			B.Furniture(EFurniture::DiningChair, FVector(M.X + 50.0f, M.Y - 92.0f, Z), 90.0f);
+			B.Furniture(EFurniture::DiningChair, FVector(M.X - 50.0f, M.Y + 92.0f, Z), -90.0f);
+			B.Furniture(EFurniture::DiningChair, FVector(M.X + 50.0f, M.Y + 92.0f, Z), -90.0f);
+			B.Furniture(EFurniture::DiningChair, FVector(M.X - 136.0f, M.Y, Z), 0.0f);
+			B.Furniture(EFurniture::DiningChair, FVector(M.X + 136.0f, M.Y, Z), 180.0f);
 			AlongWall(EFurniture::Cupboard, S, 0.5f, 10.0f);
 			AlongWall(EFurniture::Clock, (S + 2) % 4, 0.5f, 5.0f);
 			break;
@@ -512,7 +597,7 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys, float ForceWidth, f
 	if (FParse::Param(FCommandLine::Get(), TEXT("NoRoof")))
 	{
 		House.Height = Top;
-		return House;
+		PruneFurniture(House); return House;
 	}
 	B.Box(ESurface::InteriorWall, FVector(-HX, -HY, Top), FVector(HX, HY, Top + SlabThickness));
 	if (bFlatRoof)
@@ -525,7 +610,7 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys, float ForceWidth, f
 		B.Box(B.OuterSurface, FVector(-HX - 11.0f, -HY + 11.0f, Roof), FVector(-HX + 11.0f, HY - 11.0f, Roof + 70.0f));
 		B.Box(B.OuterSurface, FVector(HX - 11.0f, -HY + 11.0f, Roof), FVector(HX + 11.0f, HY - 11.0f, Roof + 70.0f));
 		House.Height = Roof + 70.0f;
-		return House;
+		PruneFurniture(House); return House;
 	}
 	const float Pitch = 38.0f;
 	const float RiseH = HY * FMath::Tan(FMath::DegreesToRadians(Pitch));
@@ -565,7 +650,7 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys, float ForceWidth, f
 	B.Box(ESurface::Stone, FVector(HX * 0.45f, -40.0f, Top), FVector(HX * 0.45f + 70.0f, 30.0f, Top + RiseH + 120.0f));
 	B.Box(ESurface::Stone, FVector(HX * 0.45f - 8.0f, -48.0f, Top + RiseH + 120.0f), FVector(HX * 0.45f + 78.0f, 38.0f, Top + RiseH + 145.0f));
 	House.Height = Top + SlabThickness + RiseH;
-	return House;
+	PruneFurniture(House); return House;
 }
 FHouse GenerateFamilyHouse1719()
 {
@@ -1019,7 +1104,7 @@ FHouse GenerateFamilyHouse1719()
 			Mesh(X, FenceFront - 0.6f, FMath::Min(X + 300.0f, FenceX), FenceFront + 0.6f);
 		}
 	}
-	return House;
+	PruneFurniture(House); return House;
 }
 
 FHouse GenerateChurch(uint32 Seed, EStyle Style)
