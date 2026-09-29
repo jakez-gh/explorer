@@ -2533,7 +2533,7 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 		const int32 Floors = (Lot->Seed % 10) < 4 ? 2 : 1;
 		const HouseGen::EStyle Style = (Lot->Seed % 5) == 0 ? HouseGen::EStyle::Brick : HouseGen::EStyle::Plaster;
 		const FQuat Quat = FRotator(0.0f, Lot->Yaw, 0.0f).Quaternion();
-		const FVector Base(Lot->Pos.X, Lot->Pos.Y, High + 40.0f);
+		const FVector Base(Lot->Pos.X, Lot->Pos.Y, High + (Lot->bFamilyHouse ? 110.0f : 40.0f)); // the family house stands 110 cm above its yard
 		const FLinearColor Wash = Washes[Lot->Seed % UE_ARRAY_COUNT(Washes)];
 		if (Level >= EProps::Shell || (Lot->bFamilyHouse && Level >= EProps::Full))
 		{
@@ -2613,7 +2613,8 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 				if (Lot->bFamilyHouse && !Piece.bTinted)
 				{
 					// Blue vinyl siding outside, earth-tone paint inside.
-					if (Piece.Surface == HouseGen::ESurface::ExteriorWall) Tint = FLinearColor(0.42f, 0.62f, 1.25f);
+					if (Piece.Surface == HouseGen::ESurface::ExteriorWall) Tint = FLinearColor(0.85f, 0.97f, 1.25f); // light grey-blue vinyl
+					else if (Piece.Surface == HouseGen::ESurface::Wood && (FMath::Abs(Piece.Center.X) > Plan.Width * 0.5f - 30.0f || FMath::Abs(Piece.Center.Y) > Plan.Depth * 0.5f - 30.0f) && Piece.Center.Z > -10.0f) Tint = FLinearColor(0.4f, 0.22f, 0.13f); // brown trim
 					else if (Piece.Surface == HouseGen::ESurface::InteriorWall) Tint = FLinearColor(1.25f, 1.02f, 0.78f);
 				}
 				HouseGen::ESurface Surface = Piece.Surface;

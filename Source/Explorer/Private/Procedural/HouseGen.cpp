@@ -757,6 +757,32 @@ FHouse GenerateFamilyHouse1719()
 		}
 		return Rise;
 	};
+	// Front-gable roof: the ridge runs from the street to the back yard, so the gable ends face the street and the yard.
+	auto GableRoofY = [&](float CX, float CY, float RX, float RY, float Top, float Pitch, ESurface Roof)
+	{
+		const float Rise = RX * FMath::Tan(FMath::DegreesToRadians(Pitch));
+		const int32 Courses = 28;
+		for (int32 c = 0; c < Courses; ++c)
+		{
+			const float Z0 = Top + c * Rise / Courses;
+			const float Half = RX * (1.0f - (c + 0.5f) / Courses);
+			for (const float Sy : { -1.0f, 1.0f })
+			{
+				B.Box(B.OuterSurface, FVector(CX - Half, CY + Sy * RY - OuterWall * 0.5f, Z0), FVector(CX + Half, CY + Sy * RY + OuterWall * 0.5f, Z0 + Rise / Courses));
+			}
+		}
+		const float Slope = FMath::Sqrt(RX * RX + Rise * Rise) + 70.0f;
+		for (const float Sx : { -1.0f, 1.0f })
+		{
+			FPiece P;
+			P.Surface = Roof;
+			P.Center = FVector(CX + Sx * RX * 0.5f, CY, Top + Rise * 0.5f + 12.0f);
+			P.Size = FVector(RY * 2.0f + 90.0f, Slope, 12.0f);
+			P.Rotation = FRotator(0.0f, 90.0f, -Sx * Pitch);
+			House.Pieces.Add(P);
+		}
+		return Rise;
+	};
 	const float WinB = 90.0f, WinT = 220.0f;
 	const float Z1 = Storey;
 	// The stairs up climb toward the back of the house, ending at a door to the outside. The cellar stairs go down
@@ -919,8 +945,8 @@ FHouse GenerateFamilyHouse1719()
 	Carpet(-HX + 12.0f, -HY + 12.0f, HX - 12.0f, HY - 12.0f, Z1, { UpStair });
 	Exterior(true, HY, Z1, Knee, {});
 	Exterior(true, -HY, Z1, Knee, {});
-	Exterior(false, -HX, Z1, Wall, { { 100.0f, 110.0f, WinB, WinT, true } });
-	Exterior(false, HX, Z1, Wall, { { 100.0f, 110.0f, WinB, WinT, true } });
+	Exterior(false, -HX, Z1, Knee, {});
+	Exterior(false, HX, Z1, Knee, {});
 	Interior(false, -50.0f, -290.0f, 300.0f, Z1, 300.0f, { });                          // boys' room is open to the landing on this side
 	Interior(false, 50.0f, -290.0f, 300.0f, Z1, 300.0f, { 100.0f });
 	// Left of the top of the stairs (facing the back door): a small carpeted closet with a toilet in it.
@@ -986,56 +1012,77 @@ FHouse GenerateFamilyHouse1719()
 	}
 	else
 	{
-		const float Rise = GableRoof(0.0f, 0.0f, HX, HY, Top, 44.0f, ESurface::SlateRoof);
+		const float Rise = GableRoofY(0.0f, 0.0f, HX, HY, Top, 44.0f, ESurface::SlateRoof);
 		House.Height = Top + Rise;
 		// Upstairs ceilings: the angled parts under the roof slopes are painted the wall's light blue; the flat middle is white.
 		const float FlatZ = Z1 + 240.0f;
-		const float FlatY = HY - (FlatZ - Top) / FMath::Tan(FMath::DegreesToRadians(44.0f));
-		Tinted(ESurface::InteriorWall, FLinearColor(1.5f, 1.5f, 1.5f), -HX + 11.0f, -FlatY, FlatZ, HX - 11.0f, FlatY, FlatZ + 4.0f);
-		for (const float Sy : { -1.0f, 1.0f })
+		const float FlatX = HX - (FlatZ - Top) / FMath::Tan(FMath::DegreesToRadians(44.0f));
+		Tinted(ESurface::InteriorWall, FLinearColor(1.5f, 1.5f, 1.5f), -FlatX, -HY + 11.0f, FlatZ, FlatX, HY - 11.0f, FlatZ + 4.0f);
+		for (const float Sx : { -1.0f, 1.0f })
 		{
-			const float Run = HY - FlatY, Lift = FlatZ - Top;
+			const float Run = HX - FlatX, Lift = FlatZ - Top;
 			FPiece Lining;
 			Lining.Surface = ESurface::InteriorWall;
-			Lining.Center = FVector(0.0f, Sy * (FlatY + Run * 0.5f), Top + Lift * 0.5f - 7.0f);
-			Lining.Size = FVector(HX * 2.0f - 22.0f, FMath::Sqrt(Run * Run + Lift * Lift) + 8.0f, 3.0f);
-			Lining.Rotation = FRotator(0.0f, 0.0f, Sy * 44.0f);
+			Lining.Center = FVector(Sx * (FlatX + Run * 0.5f), 0.0f, Top + Lift * 0.5f - 7.0f);
+			Lining.Size = FVector(HY * 2.0f - 22.0f, FMath::Sqrt(Run * Run + Lift * Lift) + 8.0f, 3.0f);
+			Lining.Rotation = FRotator(0.0f, 90.0f, -Sx * 44.0f);
 			Lining.bTinted = true;
 			Lining.Tint = FLinearColor(0.72f, 0.9f, 1.35f);
 			House.Pieces.Add(Lining);
 		}
-		Box(ESurface::BrickWall, HX * 0.5f, -140.0f, Top, HX * 0.5f + 60.0f, -70.0f, Top + Rise * 0.6f + 110.0f); // chimney
+		Box(ESurface::BrickWall, 120.0f, -140.0f, Top, 180.0f, -70.0f, Top + 300.0f); // chimney
 	}
-	// Gable-end windows for the boys' and girl's rooms.
-	for (const float Sx : { -1.0f, 1.0f })
+	// Gable-end windows: a pair side by side in the front gable, a small one at the back (drawn just outside the gable siding).
+	for (const float X : { -42.0f, 42.0f })
 	{
-		Box(ESurface::Wood, Sx * (HX + 5.0f) - 7.0f, 40.0f, Z1 + 60.0f, Sx * (HX + 5.0f) + 7.0f, 160.0f, Z1 + 200.0f);
-		Box(ESurface::Glass, Sx * (HX + 13.0f) - 1.5f, 48.0f, Z1 + 68.0f, Sx * (HX + 13.0f) + 1.5f, 152.0f, Z1 + 192.0f);
+		Box(ESurface::Wood, X - 38.0f, HY + 4.0f, Z1 + 140.0f, X + 38.0f, HY + 16.0f, Z1 + 290.0f);
+		Box(ESurface::Glass, X - 30.0f, HY + 14.0f, Z1 + 148.0f, X + 30.0f, HY + 17.0f, Z1 + 282.0f);
 	}
-	// Enclosed front porch: glazed walls all round and a lean-to roof; concrete steps in front.
+	Box(ESurface::Wood, -30.0f, -HY - 16.0f, Z1 + 150.0f, 30.0f, -HY - 4.0f, Z1 + 250.0f);
+	Box(ESurface::Glass, -24.0f, -HY - 17.0f, Z1 + 156.0f, 24.0f, -HY - 14.0f, Z1 + 244.0f);
+	// Enclosed front porch across the whole front: siding skirt, banks of windows, a lean-to roof, wooden steps to the yard.
 	{
-		const float PX0 = -HX, PX1 = 150.0f, PY = HY + 240.0f;
-		Box(ESurface::Stone, PX0 - 15.0f, HY, -60.0f, PX1 + 15.0f, PY + 15.0f, 0.0f);
+		const float PX0 = -HX, PX1 = HX, PY = HY + 220.0f;
+		Box(ESurface::Stone, PX0 - 15.0f, HY, -110.0f, PX1 + 15.0f, PY + 15.0f, -8.0f);
 		Box(ESurface::PlankFloor, PX0, HY, -8.0f, PX1, PY, 0.0f);
 		FWall Front; Front.bAlongX = true; Front.Fixed = PY; Front.From = PX0; Front.To = PX1; Front.Thickness = 14.0f; Front.bExterior = true;
-		Front.Openings.Add({ -300.0f, 140.0f, 60.0f, 220.0f, true });
 		Front.Openings.Add({ -170.0f, 100.0f, 0.0f, DoorHeight, false });
-		Front.Openings.Add({ -30.0f, 140.0f, 60.0f, 220.0f, true });
+		for (const float X : { -330.0f, -260.0f, 40.0f, 110.0f, 260.0f, 350.0f })
+		{
+			Front.Openings.Add({ X, 60.0f, 95.0f, 225.0f, true });
+		}
 		B.Wall(Front, 0.0f, 240.0f);
 		FWall WestW; WestW.bAlongX = false; WestW.Fixed = PX0; WestW.From = HY; WestW.To = PY; WestW.Thickness = 14.0f; WestW.bExterior = true;
-		WestW.Openings.Add({ HY + 120.0f, 140.0f, 60.0f, 220.0f, true });
+		WestW.Openings.Add({ HY + 110.0f, 130.0f, 95.0f, 225.0f, true });
 		B.Wall(WestW, 0.0f, 240.0f);
 		FWall EastW = WestW; EastW.Fixed = PX1;
 		B.Wall(EastW, 0.0f, 240.0f);
 		FPiece Roof; Roof.Surface = ESurface::SlateRoof;
-		Roof.Center = FVector((PX0 + PX1) * 0.5f, HY + 120.0f, 262.0f);
-		Roof.Size = FVector(PX1 - PX0 + 60.0f, 300.0f, 10.0f);
+		Roof.Center = FVector(0.0f, HY + 110.0f, 262.0f);
+		Roof.Size = FVector(PX1 - PX0 + 70.0f, 290.0f, 10.0f);
 		Roof.Rotation = FRotator(0.0f, 0.0f, 10.0f);
 		House.Pieces.Add(Roof);
-		Box(ESurface::Stone, -170.0f - 120.0f, PY + 15.0f, -60.0f, -170.0f + 120.0f, PY + 75.0f, -20.0f);
-		Box(ESurface::Stone, -170.0f - 100.0f, PY + 75.0f, -60.0f, -170.0f + 100.0f, PY + 130.0f, -40.0f);
-		Box(ESurface::Stone, -170.0f + 100.0f, PY + 15.0f, -60.0f, -170.0f + 108.0f, PY + 130.0f, 45.0f);
-		Box(ESurface::Stone, -170.0f - 108.0f, PY + 15.0f, -60.0f, -170.0f - 100.0f, PY + 130.0f, 45.0f);
+		const FLinearColor Pine(1.7f, 1.35f, 0.8f);
+		for (int32 k = 0; k < 6; ++k)
+		{
+			Tinted(ESurface::Wood, Pine, -170.0f - 65.0f, PY + 15.0f + k * 26.0f, -110.0f, -170.0f + 65.0f, PY + 41.0f + k * 26.0f, -110.0f + (6 - k) * 18.0f);
+		}
+		for (const float Sx : { -1.0f, 1.0f })
+		{
+			Tinted(ESurface::Wood, Pine, -170.0f + Sx * 62.0f - 3.0f, PY + 15.0f, -20.0f, -170.0f + Sx * 62.0f + 3.0f, PY + 175.0f, 70.0f);
+		}
+	}
+	// A wooden deck and steps at the back door.
+	{
+		const FLinearColor Pine(1.7f, 1.35f, 0.8f);
+		Tinted(ESurface::Wood, Pine, -340.0f, -HY - 170.0f, -14.0f, -140.0f, -HY, 0.0f);
+		for (int32 k = 0; k < 6; ++k)
+		{
+			Tinted(ESurface::Wood, Pine, -300.0f, -HY - 170.0f - (k + 1) * 26.0f, -110.0f, -180.0f, -HY - 170.0f - k * 26.0f, -110.0f + (6 - k) * 18.0f);
+		}
+		Tinted(ESurface::Wood, Pine, -342.0f, -HY - 170.0f, 0.0f, -336.0f, -HY, 95.0f);
+		Tinted(ESurface::Wood, Pine, -144.0f, -HY - 170.0f, 0.0f, -138.0f, -HY, 95.0f);
+		Tinted(ESurface::Wood, Pine, -342.0f, -HY - 176.0f, 0.0f, -138.0f, -HY - 170.0f, 95.0f);
 	}
 
 	// Interior walls were each a solid colour or wood panelling, never patterned: light blue everywhere upstairs; downstairs
@@ -1067,6 +1114,7 @@ FHouse GenerateFamilyHouse1719()
 	}
 
 	// ================= Garage, parking pad, fence =================
+	const int32 YardStart = House.Pieces.Num();
 	{
 		const float GX = 340.0f, GY = -1600.0f, GHX = 300.0f, GHY = 320.0f;
 		Box(ESurface::Stone, GX - GHX - 10.0f, GY - GHY - 10.0f, -60.0f, GX + GHX + 10.0f, GY + GHY + 10.0f, 0.0f);
@@ -1104,6 +1152,7 @@ FHouse GenerateFamilyHouse1719()
 			Mesh(X, FenceFront - 0.6f, FMath::Min(X + 300.0f, FenceX), FenceFront + 0.6f);
 		}
 	}
+	for (int32 k = YardStart; k < House.Pieces.Num(); ++k) House.Pieces[k].Center.Z -= 100.0f;
 	PruneFurniture(House); return House;
 }
 

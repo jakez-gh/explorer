@@ -468,7 +468,9 @@ namespace RealPlace
 			const FVector2D Spot33 = Block.Num() > 0 ? Block[FMath::Min(16, Block.Num() - 1)] : ToWorld(-1497.0, 745.0);
 			Place.Landmarks.Add({ TEXT("1733 Avenue E"), Spot33 });
 			// The family's house is 1719 Avenue E (renumbered since): the 10th odd number after 17th Street.
-			const FVector2D Spot = Block.Num() > 0 ? Block[FMath::Min(9, Block.Num() - 1)] : ToWorld(-1490.0, 745.0);
+			// Zillow's photos of 1733 E Ave match the family's house (grey-blue vinyl, brown trim, enclosed porch, chain-link fence):
+			// it is the same house, renumbered, so both addresses lead to it.
+			const FVector2D Spot = Spot33;
 			Place.Landmarks.Add({ TEXT("1719 Avenue E"), Spot });
 			// That lot becomes the hand-planned house.
 			int32 Nearest = INDEX_NONE;
