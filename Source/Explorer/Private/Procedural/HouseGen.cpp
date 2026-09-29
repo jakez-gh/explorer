@@ -891,6 +891,22 @@ FHouse GenerateFamilyHouse1719()
 	{
 		const float Rise = GableRoof(0.0f, 0.0f, HX, HY, Top, 44.0f, ESurface::SlateRoof);
 		House.Height = Top + Rise;
+		// Upstairs ceilings: the angled parts under the roof slopes are painted the wall's light blue; the flat middle is white.
+		const float FlatZ = Z1 + 240.0f;
+		const float FlatY = HY - (FlatZ - Top) / FMath::Tan(FMath::DegreesToRadians(44.0f));
+		Tinted(ESurface::InteriorWall, FLinearColor(1.5f, 1.5f, 1.5f), -HX + 11.0f, -FlatY, FlatZ, HX - 11.0f, FlatY, FlatZ + 4.0f);
+		for (const float Sy : { -1.0f, 1.0f })
+		{
+			const float Run = HY - FlatY, Lift = FlatZ - Top;
+			FPiece Lining;
+			Lining.Surface = ESurface::InteriorWall;
+			Lining.Center = FVector(0.0f, Sy * (FlatY + Run * 0.5f), Top + Lift * 0.5f - 7.0f);
+			Lining.Size = FVector(HX * 2.0f - 22.0f, FMath::Sqrt(Run * Run + Lift * Lift) + 8.0f, 3.0f);
+			Lining.Rotation = FRotator(0.0f, 0.0f, Sy * 44.0f);
+			Lining.bTinted = true;
+			Lining.Tint = FLinearColor(0.72f, 0.9f, 1.35f);
+			House.Pieces.Add(Lining);
+		}
 		Box(ESurface::BrickWall, HX * 0.5f, -140.0f, Top, HX * 0.5f + 60.0f, -70.0f, Top + Rise * 0.6f + 110.0f); // chimney
 	}
 	// Gable-end windows for the boys' and girl's rooms.
