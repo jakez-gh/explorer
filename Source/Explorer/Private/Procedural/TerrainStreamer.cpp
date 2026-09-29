@@ -1,5 +1,6 @@
 #include "Procedural/TerrainStreamer.h"
 #include "Procedural/WorldGen.h"
+#include "Procedural/RealPlace.h"
 #include "Procedural/HouseGen.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/AssetData.h"
@@ -257,6 +258,7 @@ int32 ATerrainStreamer::StepForDistance(float DistanceInChunks) const
 void ATerrainStreamer::BeginPlay()
 {
 	Super::BeginPlay();
+	RealPlace::Load();
 	GrassMesh = CreateGrassClumpMesh();
 	for (int32 Variant = 0; Variant < NumTreeVariants; ++Variant)
 	{

@@ -78,6 +78,8 @@ namespace WorldGen
 		float Width = 400.0f;
 		bool bRoad = true;
 		uint32 Seed = 0;
+		// Real mapped roads run point to point with no meander.
+		bool bStraight = false;
 	};
 	double RoadCellSize();
 	FVector2D RoadNode(int32 CellX, int32 CellY);

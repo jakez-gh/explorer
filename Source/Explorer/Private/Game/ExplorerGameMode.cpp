@@ -4,6 +4,7 @@
 #include "Game/ExplorerSaveGame.h"
 #include "Procedural/TerrainStreamer.h"
 #include "Procedural/WorldGen.h"
+#include "Procedural/RealPlace.h"
 #include "Components/DirectionalLightComponent.h"
 #include "Components/ExponentialHeightFogComponent.h"
 #include "Components/SkyLightComponent.h"
@@ -144,6 +145,11 @@ APawn* AExplorerGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPla
 		Report(TEXT("world tree"), ATerrainStreamer::WorldTreeCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindWorldTree(X, Y, P); });
 		Report(TEXT("sky gate"), ATerrainStreamer::SkyGateCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindSkyGate(X, Y, P); });
 		Report(TEXT("wind farm"), ATerrainStreamer::WindFarmCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindWindFarm(X, Y, P); });
+		if (RealPlace::Load())
+		{
+			const FVector2D O = RealPlace::Origin();
+			UE_LOG(LogTemp, Display, TEXT("BiomeReport: Council Bluffs (Bayliss Park) at X=%.0f Y=%.0f (%.1f km)"), O.X, O.Y, O.Size() / 100000.0);
+		}
 		Report(TEXT("volcano"), WorldGen::VolcanoCellSize(), [](int32 X, int32 Y, FVector& P)
 		{
 			FVector2D C; float R, H;
@@ -151,6 +157,26 @@ APawn* AExplorerGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPla
 			P = FVector(C, WorldGen::Height(C.X, C.Y));
 			return true;
 		});
+	}
+
+	// -StartAt=<name> starts over a mapped Council Bluffs landmark (e.g. -StartAt="Big Lake Park"); -CouncilBluffs starts over Bayliss Park.
+	FString StartAt;
+	if (FParse::Value(FCommandLine::Get(), TEXT("StartAt="), StartAt) || FParse::Param(FCommandLine::Get(), TEXT("CouncilBluffs")))
+	{
+		if (StartAt.IsEmpty())
+		{
+			StartAt = TEXT("Bayliss Park");
+		}
+		FVector2D At;
+		if (RealPlace::Load() && RealPlace::FindLandmark(StartAt, At))
+		{
+			FVector Spot(At.X, At.Y, WorldGen::Height(At.X, At.Y) + 6000.0f);
+			FParse::Value(FCommandLine::Get(), TEXT("StartZ="), Spot.Z);
+			FRotator Look(-15.0f, 0.0f, 0.0f);
+			FParse::Value(FCommandLine::Get(), TEXT("StartYaw="), Look.Yaw);
+			FParse::Value(FCommandLine::Get(), TEXT("StartPitch="), Look.Pitch);
+			return SpawnDefaultPawnAtTransform(NewPlayer, FTransform(Look, Spot));
+		}
 	}
 
 	// -StartX= / -StartY= pick the starting point (world units); otherwise start over land near the origin.

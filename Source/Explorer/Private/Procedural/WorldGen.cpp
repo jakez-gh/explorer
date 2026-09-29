@@ -1,4 +1,5 @@
 #include "Procedural/WorldGen.h"
+#include "Procedural/RealPlace.h"
 
 namespace
 {
@@ -112,12 +113,21 @@ namespace WorldGen
 				}
 			}
 		};
-		Gather(RoadCellSize(), true, 0.9f, 420.0f, 940, &RoadNode);
-		Gather(TrailCellSize, false, 0.45f, 150.0f, 950, &TrailNode);
+		// Inside Council Bluffs the real mapped streets and trails replace the generated ones.
+		if (!RealPlace::Covers(Min, Max, Margin))
+		{
+			Gather(RoadCellSize(), true, 0.9f, 420.0f, 940, &RoadNode);
+			Gather(TrailCellSize, false, 0.45f, 150.0f, 950, &TrailNode);
+		}
+		RealPlace::AppendPaths(Min, Max, Margin, Out);
 	}
 
 	FVector2D PathPoint(const FPath& Path, float T)
 	{
+		if (Path.bStraight)
+		{
+			return FMath::Lerp(Path.A, Path.B, T);
+		}
 		const FVector2D Along = Path.B - Path.A;
 		const float Length = Along.Size();
 		const FVector2D Side(-Along.Y / Length, Along.X / Length);
@@ -360,6 +370,7 @@ namespace WorldGen
 		Out.Land = Land;
 		Out.Mountains = Ranges;
 		Out.Color = Color;
+		RealPlace::Apply(WorldX, WorldY, Out);
 		return Out;
 	}
 }

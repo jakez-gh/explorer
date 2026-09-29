@@ -23,7 +23,8 @@ public class Explorer : ModuleRules
 			"ProceduralMeshComponent",
 			"MeshDescription",
 			"AssetRegistry",
-			"StaticMeshDescription"
+			"StaticMeshDescription",
+			"Json"
 		});
 	}
 }
