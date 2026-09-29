@@ -468,6 +468,47 @@ namespace RealPlace
 		}
 	}
 
+	bool NearestRoad(const FVector2D& P, double MaxDist, FVector2D& OutPoint, float& OutWidth)
+	{
+		if (!bReady.load())
+		{
+			return false;
+		}
+		double Best = MaxDist * MaxDist;
+		bool bFound = false;
+		for (int32 BY = FMath::FloorToInt((P.Y - MaxDist) / RoadBucket); BY <= FMath::FloorToInt((P.Y + MaxDist) / RoadBucket); ++BY)
+		{
+			for (int32 BX = FMath::FloorToInt((P.X - MaxDist) / RoadBucket); BX <= FMath::FloorToInt((P.X + MaxDist) / RoadBucket); ++BX)
+			{
+				const TArray<int32>* Bucket = Place.RoadGrid.Find(FIntPoint(BX, BY));
+				if (!Bucket)
+				{
+					continue;
+				}
+				for (const int32 Index : *Bucket)
+				{
+					const FSegment& Seg = Place.Segments[Index];
+					if (!Seg.bRoad)
+					{
+						continue;
+					}
+					const FVector2D AB = Seg.B - Seg.A;
+					const double T = FMath::Clamp(FVector2D::DotProduct(P - Seg.A, AB) / FMath::Max(AB.SizeSquared(), 1.0), 0.0, 1.0);
+					const FVector2D Q = Seg.A + AB * T;
+					const double D2 = FVector2D::DistSquared(P, Q);
+					if (D2 < Best)
+					{
+						Best = D2;
+						OutPoint = Q;
+						OutWidth = Seg.Width;
+						bFound = true;
+					}
+				}
+			}
+		}
+		return bFound;
+	}
+
 	void BuildingsIn(const FVector2D& Min, const FVector2D& Max, TArray<const FBuilding*>& Out)
 	{
 		if (!bReady.load())

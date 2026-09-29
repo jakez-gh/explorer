@@ -63,7 +63,8 @@ namespace HouseGen
 	};
 
 	// Seed picks size, style and layout. Footprint is roughly Width x Depth (cm).
-	FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys);
+	// ForceWidth/ForceDepth (cm) fix the footprint (0 = random); bFlatRoof gives a parapet roof instead of a gable.
+	FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys, float ForceWidth = 0.0f, float ForceDepth = 0.0f, bool bFlatRoof = false, int32 ForceFloors = 0);
 
 	// A village church with a nave, pews, altar, and a bell tower over the entrance. Front door on +Y.
 	FHouse GenerateChurch(uint32 Seed, EStyle Style);

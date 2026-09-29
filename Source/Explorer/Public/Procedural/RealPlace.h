@@ -35,6 +35,9 @@ namespace RealPlace
 	void AppendPaths(const FVector2D& Min, const FVector2D& Max, double Margin, TArray<WorldGen::FPath>& Out);
 	void BuildingsIn(const FVector2D& Min, const FVector2D& Max, TArray<const FBuilding*>& Out);
 
+	// Nearest mapped road to P: its closest point (world) and width; false if none within MaxDist.
+	bool NearestRoad(const FVector2D& P, double MaxDist, FVector2D& OutPoint, float& OutWidth);
+
 	// Named landmarks (schools, parks...) in world units, for reports and starting positions.
 	struct FLandmark { FString Name; FVector2D Pos; };
 	const TArray<FLandmark>& Landmarks();

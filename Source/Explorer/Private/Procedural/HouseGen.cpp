@@ -292,13 +292,15 @@ namespace
 	}
 }
 
-FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys)
+FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys, float ForceWidth, float ForceDepth, bool bFlatRoof, int32 ForceFloors)
 {
 	FHouse House;
 	FRand Rand{ Seed };
-	const float W = FMath::GridSnap(Rand.Range(800.0f, 1300.0f), 10.0f);
-	const float D = FMath::GridSnap(Rand.Range(650.0f, 1000.0f), 10.0f);
-	const int32 Floors = bTwoStoreys ? 2 : 1;
+	const float RandW = FMath::GridSnap(Rand.Range(800.0f, 1300.0f), 10.0f);
+	const float RandD = FMath::GridSnap(Rand.Range(650.0f, 1000.0f), 10.0f);
+	const float W = ForceWidth > 0.0f ? FMath::Max(ForceWidth, 560.0f) : RandW;
+	const float D = ForceDepth > 0.0f ? FMath::Max(ForceDepth, 520.0f) : RandD;
+	const int32 Floors = ForceFloors > 0 ? ForceFloors : bTwoStoreys ? 2 : 1;
 	House.Width = W;
 	House.Depth = D;
 
@@ -513,6 +515,18 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys)
 		return House;
 	}
 	B.Box(ESurface::InteriorWall, FVector(-HX, -HY, Top), FVector(HX, HY, Top + SlabThickness));
+	if (bFlatRoof)
+	{
+		// Flat roof behind a parapet.
+		const float Roof = Top + SlabThickness;
+		B.Box(ESurface::SlateRoof, FVector(-HX - 10.0f, -HY - 10.0f, Roof), FVector(HX + 10.0f, HY + 10.0f, Roof + 8.0f));
+		B.Box(B.OuterSurface, FVector(-HX - 11.0f, -HY - 11.0f, Roof), FVector(HX + 11.0f, -HY + 11.0f, Roof + 70.0f));
+		B.Box(B.OuterSurface, FVector(-HX - 11.0f, HY - 11.0f, Roof), FVector(HX + 11.0f, HY + 11.0f, Roof + 70.0f));
+		B.Box(B.OuterSurface, FVector(-HX - 11.0f, -HY + 11.0f, Roof), FVector(-HX + 11.0f, HY - 11.0f, Roof + 70.0f));
+		B.Box(B.OuterSurface, FVector(HX - 11.0f, -HY + 11.0f, Roof), FVector(HX + 11.0f, HY - 11.0f, Roof + 70.0f));
+		House.Height = Roof + 70.0f;
+		return House;
+	}
 	const float Pitch = 38.0f;
 	const float RiseH = HY * FMath::Tan(FMath::DegreesToRadians(Pitch));
 	const int32 Courses = 24;

@@ -1483,6 +1483,7 @@ void ATerrainStreamer::ComputeProps(const FIntPoint& Coord, EProps Level, FJobRe
 	AddVolcanoGlow(Coord, Batch);
 	AddFloatingIslands(Coord, Batch);
 	AddDiscoveries(Coord, Batch);
+	AddRealBuildings(Coord, Batch, Level);
 	if (Level == EProps::Trees)
 	{
 		AddVegetation(Coord, Batch, true);
@@ -2287,6 +2288,156 @@ void ATerrainStreamer::AddDiscoveries(const FIntPoint& Coord, FPropBatch& Batch)
 			}
 		}
 	});
+}
+
+void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batch, EProps Level) const
+{
+	const FVector2D Min(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize());
+	const FVector2D Max = Min + FVector2D(ChunkWorldSize());
+	if (!RealPlace::Covers(Min, Max, 0.0))
+	{
+		return;
+	}
+	TArray<const RealPlace::FBuilding*> Buildings;
+	RealPlace::BuildingsIn(Min, Max, Buildings);
+	static const FLinearColor Washes[] = { FLinearColor(1.5f, 1.45f, 1.3f), FLinearColor(1.35f, 1.3f, 1.05f), FLinearColor(1.1f, 1.2f, 1.25f), FLinearColor(1.4f, 1.15f, 1.0f), FLinearColor(1.2f, 1.2f, 1.2f) };
+	for (const RealPlace::FBuilding* B : Buildings)
+	{
+		// Smallest oriented rectangle around the outline: try each edge direction. Points are (X north, Y east).
+		double BestArea = TNumericLimits<double>::Max();
+		float BestAngleDeg = 0.0f, BestW = 0.0f, BestD = 0.0f;
+		FVector2D BestCenter = B->Centroid;
+		for (int32 i = 0; i < B->Outline.Num(); ++i)
+		{
+			const FVector2D Edge = (B->Outline[(i + 1) % B->Outline.Num()] - B->Outline[i]).GetSafeNormal();
+			if (Edge.IsNearlyZero())
+			{
+				continue;
+			}
+			const FVector2D Perp(-Edge.Y, Edge.X);
+			double LoU = 1e30, HiU = -1e30, LoV = 1e30, HiV = -1e30;
+			for (const FVector2D& P : B->Outline)
+			{
+				const double U = FVector2D::DotProduct(P, Edge), V = FVector2D::DotProduct(P, Perp);
+				LoU = FMath::Min(LoU, U);
+				HiU = FMath::Max(HiU, U);
+				LoV = FMath::Min(LoV, V);
+				HiV = FMath::Max(HiV, V);
+			}
+			const double Area = (HiU - LoU) * (HiV - LoV);
+			if (Area < BestArea)
+			{
+				BestArea = Area;
+				BestW = HiU - LoU;
+				BestD = HiV - LoV;
+				// Rotator yaw turns world +X toward +Y; Edge is (X, Y).
+				BestAngleDeg = FMath::RadiansToDegrees(FMath::Atan2(Edge.Y, Edge.X));
+				BestCenter = Edge * ((LoU + HiU) * 0.5) + Perp * ((LoV + HiV) * 0.5);
+			}
+		}
+		if (BestW < 300.0f || BestD < 300.0f)
+		{
+			continue;
+		}
+		const uint32 Seed = WorldGen::Hash(FMath::RoundToInt(B->Centroid.X / 100.0), FMath::RoundToInt(B->Centroid.Y / 100.0), 777);
+
+		// Face the front door (+Y local) toward the nearest street; the width/depth axes follow.
+		float Yaw = BestAngleDeg;
+		float W = BestW, D = BestD;
+		FVector2D RoadPoint;
+		float RoadWidth = 0.0f;
+		if (RealPlace::NearestRoad(B->Centroid, 6000.0, RoadPoint, RoadWidth))
+		{
+			const FVector2D To = (RoadPoint - B->Centroid).GetSafeNormal();
+			float BestDot = -2.0f;
+			int32 BestK = 0;
+			for (int32 k = 0; k < 4; ++k)
+			{
+				const FVector Front = FRotator(0.0f, BestAngleDeg + 90.0f * k, 0.0f).RotateVector(FVector(0, 1, 0));
+				const float Dot = FVector2D::DotProduct(FVector2D(Front.X, Front.Y), To);
+				if (Dot > BestDot)
+				{
+					BestDot = Dot;
+					BestK = k;
+				}
+			}
+			Yaw = BestAngleDeg + 90.0f * BestK;
+			// Turning the frame a quarter turn swaps which measured side is the width.
+			if (BestK % 2 == 1)
+			{
+				Swap(W, D);
+			}
+		}
+
+		const FVector2D Centre2 = BestCenter;
+		const float Ground = WorldGen::Height(Centre2.X, Centre2.Y);
+		if (Ground < 100.0f)
+		{
+			continue;
+		}
+		float High = Ground;
+		for (const FVector2D Corner : { FVector2D(-1, -1), FVector2D(1, -1), FVector2D(-1, 1), FVector2D(1, 1) })
+		{
+			const FVector C = FVector(Centre2.X, Centre2.Y, 0.0) + FRotator(0.0f, Yaw, 0.0f).RotateVector(FVector(Corner.X * W * 0.5f, Corner.Y * D * 0.5f, 0.0f));
+			High = FMath::Max(High, WorldGen::Height(C.X, C.Y));
+		}
+		const bool bChurch = B->Type == TEXT("church") || B->Type == TEXT("cathedral") || B->Type == TEXT("chapel");
+		const bool bBig = B->Type == TEXT("retail") || B->Type == TEXT("commercial") || B->Type == TEXT("industrial") || B->Type == TEXT("warehouse")
+			|| B->Type == TEXT("school") || B->Type == TEXT("civic") || B->Type == TEXT("public") || B->Type == TEXT("hospital")
+			|| B->Type == TEXT("office") || B->Type == TEXT("apartments") || W * D > 1.6e7f;
+		int32 Floors = 1;
+		if (B->HeightM > 3.0f)
+		{
+			Floors = FMath::Clamp(FMath::RoundToInt((B->HeightM - 1.5f) / 3.3f), 1, 12);
+		}
+		else if (!bBig)
+		{
+			Floors = (Seed % 10) < 4 ? 2 : 1;
+		}
+		else if (B->Type == TEXT("school") || B->Type == TEXT("apartments"))
+		{
+			Floors = 2;
+		}
+		const HouseGen::EStyle Style = (Seed & 3) == 0 ? HouseGen::EStyle::Brick : HouseGen::EStyle::Plaster;
+		const FQuat Quat = FRotator(0.0f, Yaw, 0.0f).Quaternion();
+		const FVector Base(Centre2.X, Centre2.Y, High + 40.0f);
+		const bool bDetailed = W * D <= 1.2e7f;
+		if (Level == EProps::Full && (bDetailed || bChurch))
+		{
+			const HouseGen::FHouse Plan = bChurch ? HouseGen::GenerateChurch(Seed, Style)
+				: HouseGen::Generate(Seed, Style, Floors > 1, W, D, bBig, Floors);
+			const FLinearColor Wash = Washes[Seed % UE_ARRAY_COUNT(Washes)];
+			for (const HouseGen::FPiece& Piece : Plan.Pieces)
+			{
+				const FVector World = Base + Quat.RotateVector(Piece.Center);
+				const FRotator PieceRot = (Quat * Piece.Rotation.Quaternion()).Rotator();
+				if (Piece.bFurniture)
+				{
+					Batch.Add(static_cast<EPropPart>(Furniture0 + static_cast<int32>(Piece.Furniture)), World, PieceRot, FVector::OneVector, White);
+					continue;
+				}
+				FVector Size = Piece.Size;
+				FVector Mid = World;
+				if (Piece.Surface == HouseGen::ESurface::Stone && Piece.Center.Z < 0.0f)
+				{
+					const float Extra = High - Ground + 150.0f;
+					Size.Z += Extra;
+					Mid.Z -= Extra * 0.5f;
+				}
+				Batch.Add(static_cast<EPropPart>(BuildSurf0 + static_cast<int32>(Piece.Surface)), Mid, PieceRot, Size,
+					Piece.Surface == HouseGen::ESurface::ExteriorWall ? Wash : White);
+			}
+			continue;
+		}
+		// Far away (or too big for a furnished interior): a solid block, plus a roof on houses.
+		const float Height = Floors * 290.0f + (bBig ? 80.0f : 120.0f);
+		Batch.Add(Cube, Base + Quat.RotateVector(FVector(0, 0, Height * 0.5f - 60.0f)), FRotator(0.0f, Yaw, 0.0f), FVector(W, D, Height + 60.0f + (High - Ground)),
+			bBig ? FLinearColor(1.1f, 1.05f, 0.95f) : Washes[Seed % UE_ARRAY_COUNT(Washes)], 0.0f, SurfConcrete);
+		if (!bBig)
+		{
+			Batch.Add(Cube, Base + Quat.RotateVector(FVector(0, 0, Height + 40.0f)), FRotator(0.0f, Yaw, 0.0f), FVector(W + 60.0f, D + 60.0f, 120.0f), FLinearColor(0.35f, 0.32f, 0.3f), 0.0f, SurfSlate);
+		}
+	}
 }
 
 void ATerrainStreamer::AddCities(const FIntPoint& Coord, FPropBatch& Batch) const

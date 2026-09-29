@@ -282,6 +282,7 @@ private:
 	void AddVillages(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddStoneCircles(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddDiscoveries(const FIntPoint& Coord, FPropBatch& Batch) const;
+	void AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batch, EProps Level) const;
 	void AddCities(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddLighthouses(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddVolcanoGlow(const FIntPoint& Coord, FPropBatch& Batch) const;
