@@ -674,9 +674,10 @@ FHouse GenerateFamilyHouse1719()
 	};
 	const float WinB = 90.0f, WinT = 220.0f;
 	const float Z1 = Storey;
-	const FHole UpStair{ -45.0f, -90.0f, 45.0f, 270.0f };
-	const FHole UpBath{ 50.0f, -290.0f, 230.0f, -120.0f };
-	const FHole DownStair{ -45.0f, -470.0f, 45.0f, -110.0f };
+	// The stairs up climb toward the back of the house, ending at a door to the outside. The cellar stairs go down
+	// from the back room on the east side.
+	const FHole UpStair{ -45.0f, -460.0f, 45.0f, -100.0f };
+	const FHole DownStair{ 65.0f, -525.0f, 425.0f, -415.0f };
 	const float BZ = -Storey;
 
 	// ================= Basement (cinderblock) =================
@@ -694,13 +695,13 @@ FHouse GenerateFamilyHouse1719()
 			Tinted(ESurface::TileFloor, ((i + j) & 1) ? Orange : Black, X0, Y0, BZ, FMath::Min(X0 + 59.0f, HX - 11.0f), FMath::Min(Y0 + 60.0f, HY - 11.0f), BZ + 2.0f);
 		}
 	}
-	// Cellar stairs: from the back of the central hall down toward the back wall.
+	// Cellar stairs: down from the back room, running east.
 	for (int32 s = 0; s < 15; ++s)
 	{
 		const float Run = 360.0f / 15.0f, Rise = Storey / 15.0f;
-		Box(ESurface::Wood, -45.0f, -110.0f - (s + 1) * Run, BZ + 2.0f, 45.0f, -110.0f - s * Run, -(s + 1) * Rise + 2.0f);
+		Box(ESurface::Wood, 65.0f + s * Run, -525.0f, BZ + 2.0f, 65.0f + (s + 1) * Run, -415.0f, -(s + 1) * Rise + 2.0f);
 	}
-	// Teen's bedroom (back-left) and the laundry (back-right) built as cinderblock rooms.
+	// Teen's bedroom (back-left) built as a cinderblock room.
 	auto CinderWall = [&](bool bAlongX, float Fixed, float From, float To, std::initializer_list<float> Doors)
 	{
 		FWall W;
@@ -710,23 +711,19 @@ FHouse GenerateFamilyHouse1719()
 	};
 	CinderWall(true, -230.0f, -HX + 11.0f, -140.0f, {});
 	CinderWall(false, -140.0f, -HY + 11.0f, -230.0f, { -380.0f });
-	CinderWall(true, -300.0f, 140.0f, HX - 11.0f, {});
-	CinderWall(false, 140.0f, -HY + 11.0f, -300.0f, { -420.0f });
 	// Teen's room.
-	Put(EFurniture::Bed, -HX + 111.0f, -390.0f, 0.0f, BZ);
+	Tinted(ESurface::InteriorWall, FLinearColor(0.8f, 0.72f, 0.6f), -HX + 14.0f, -460.0f, BZ, -HX + 204.0f, -320.0f, BZ + 26.0f);   // mattress on the floor
 	Put(EFurniture::Nightstand, -HX + 40.0f, -300.0f, 0.0f, BZ);
 	Box(ESurface::Wood, -360.0f, -340.0f, BZ + 72.0f, -300.0f, -230.0f + 0.0f, BZ + 78.0f);
 	Put(EFurniture::DiningChair, -330.0f, -290.0f, 0.0f, BZ);
 	Put(EFurniture::Drawers, -230.0f, -520.0f, 90.0f, BZ);
 	Put(EFurniture::Mirror, -160.0f, -300.0f, 180.0f, BZ + 100.0f);
 	Put(EFurniture::CeilingLamp, -290.0f, -390.0f, 0.0f, -SlabThickness - 45.0f);
-	// Laundry.
-	Box(ESurface::InteriorWall, HX - 90.0f, -520.0f, BZ, HX - 20.0f, -450.0f, BZ + 95.0f);
-	Box(ESurface::InteriorWall, HX - 90.0f, -440.0f, BZ, HX - 20.0f, -370.0f, BZ + 95.0f);
-	Box(ESurface::Wood, 160.0f, -520.0f, BZ, 230.0f, -400.0f, BZ + 90.0f);
-	Box(ESurface::InteriorWall, 240.0f, -510.0f, BZ + 60.0f, 300.0f, -460.0f, BZ + 90.0f);
-	Box(ESurface::Stone, 160.0f, -350.0f, BZ, 215.0f, -310.0f, BZ + 140.0f);                               // water heater
-	Put(EFurniture::CeilingLamp, 290.0f, -420.0f, 0.0f, -SlabThickness - 45.0f);
+	// Laundry, out in the open along the west wall, and the water heater.
+	Box(ESurface::InteriorWall, -HX + 14.0f, -160.0f, BZ, -HX + 80.0f, -95.0f, BZ + 95.0f);
+	Box(ESurface::InteriorWall, -HX + 14.0f, -85.0f, BZ, -HX + 80.0f, -20.0f, BZ + 95.0f);
+	Box(ESurface::Wood, -HX + 14.0f, -10.0f, BZ, -HX + 80.0f, 70.0f, BZ + 90.0f);
+	Box(ESurface::Stone, 200.0f, -350.0f, BZ, 255.0f, -310.0f, BZ + 140.0f);
 	// Rec room with the bar.
 	Box(ESurface::Wood, 230.0f, 60.0f, BZ, 330.0f, 420.0f, BZ + 108.0f);
 	Box(ESurface::Wood, 225.0f, 55.0f, BZ + 108.0f, 335.0f, 425.0f, BZ + 114.0f);
@@ -765,11 +762,11 @@ FHouse GenerateFamilyHouse1719()
 	Interior(true, -60.0f, 50.0f, HX - 11.0f, 0.0f, Wall, { 200.0f });                   // kitchen / pantry
 	Interior(true, -205.0f, 50.0f, HX - 11.0f, 0.0f, Wall, {});                          // pantry / whole bath
 	Interior(true, -300.0f, 50.0f, HX - 11.0f, 0.0f, Wall, {});                          // bath / storage
-	// Main stairs up, straight up the middle from the back of the hall toward the front.
+	// Main stairs up, straight up the middle of the house toward the back wall; carpeted.
 	for (int32 s = 0; s < 15; ++s)
 	{
 		const float Run = 360.0f / 15.0f, Rise = Storey / 15.0f;
-		Box(ESurface::Carpet, -45.0f, -90.0f + s * Run, s * Rise, 45.0f, -90.0f + (s + 1) * Run + 3.0f, (s + 1) * Rise);
+		Box(ESurface::Carpet, -45.0f, -100.0f - (s + 1) * Run - 3.0f, s * Rise, 45.0f, -100.0f - s * Run, (s + 1) * Rise);
 	}
 	// Living room (west, front) with the window air conditioner; dining room (east, front).
 	Put(EFurniture::Sofa, -150.0f, 440.0f, 180.0f);
@@ -803,7 +800,7 @@ FHouse GenerateFamilyHouse1719()
 	Put(EFurniture::Mirror, 215.0f, -262.0f, 90.0f, 110.0f);
 	Put(EFurniture::CeilingLamp, 230.0f, -250.0f, 0.0f, Wall - 45.0f);
 	// Master bedroom (west, middle) and the baby's room (west, back; once the den).
-	Put(EFurniture::Bed, -HX + 111.0f, 100.0f, 0.0f);
+	Tinted(ESurface::InteriorWall, FLinearColor(0.85f, 0.78f, 0.66f), -HX + 14.0f, 30.0f, 0.0f, -HX + 204.0f, 170.0f, 26.0f);   // mattress, no visible frame
 	Put(EFurniture::Nightstand, -HX + 40.0f, 0.0f, 0.0f);
 	Put(EFurniture::Nightstand, -HX + 40.0f, 200.0f, 0.0f);
 	Put(EFurniture::Drawers, -230.0f, 260.0f, -90.0f);
@@ -818,24 +815,22 @@ FHouse GenerateFamilyHouse1719()
 	Put(EFurniture::CeilingLamp, -240.0f, -180.0f, 0.0f, Wall - 45.0f);
 	// Back entry and storage.
 	Put(EFurniture::Shelf, -250.0f, -500.0f, 90.0f);
-	Put(EFurniture::Cupboard, 300.0f, -515.0f, 90.0f);
 
 	// ================= Upper floor: a half-storey under the roof =================
 	FloorSlab(ESurface::PlankFloor, Z1 - SlabThickness, Z1, { UpStair });
-	Carpet(-HX + 12.0f, -HY + 12.0f, HX - 12.0f, HY - 12.0f, Z1, { UpStair, UpBath });
+	Carpet(-HX + 12.0f, -HY + 12.0f, HX - 12.0f, HY - 12.0f, Z1, { UpStair });
 	Exterior(true, HY, Z1, Knee, {});
 	Exterior(true, -HY, Z1, Knee, {});
 	Exterior(false, -HX, Z1, Wall, { { 100.0f, 110.0f, WinB, WinT, true } });
 	Exterior(false, HX, Z1, Wall, { { 100.0f, 110.0f, WinB, WinT, true } });
 	Interior(false, -50.0f, -290.0f, 300.0f, Z1, 300.0f, { });                          // boys' room is open to the landing on this side
-	Interior(false, 50.0f, -290.0f, 300.0f, Z1, 300.0f, { 100.0f, -200.0f });
-	Interior(false, 230.0f, -290.0f, -120.0f, Z1, 250.0f, {});                          // the closet bathroom at the head of the stairs
-	Interior(true, -120.0f, 50.0f, 230.0f, Z1, 250.0f, {});
-	Interior(true, -290.0f, 50.0f, 230.0f, Z1, 250.0f, {});
-	Box(ESurface::TileFloor, 55.0f, -285.0f, Z1, 225.0f, -125.0f, Z1 + 1.5f);
-	Box(ESurface::InteriorWall, 60.0f, -285.0f, Z1, 220.0f, -215.0f, Z1 + 55.0f);   // tub
-	Box(ESurface::InteriorWall, 175.0f, -165.0f, Z1, 210.0f, -130.0f, Z1 + 40.0f);   // toilet
-	Box(ESurface::InteriorWall, 60.0f, -165.0f, Z1, 110.0f, -135.0f, Z1 + 85.0f);    // sink                    // girl's dormer room door
+	Interior(false, 50.0f, -290.0f, 300.0f, Z1, 300.0f, { 100.0f });
+	// Left of the top of the stairs (facing the back door): a small carpeted closet with a toilet in it.
+	Interior(false, 180.0f, -535.0f, -430.0f, Z1, 200.0f, {});
+	Interior(true, -430.0f, 50.0f, 180.0f, Z1, 200.0f, {});
+	Interior(false, 50.0f, -535.0f, -430.0f, Z1, 200.0f, { -490.0f });
+	Box(ESurface::InteriorWall, 130.0f, -520.0f, Z1, 165.0f, -480.0f, Z1 + 40.0f);             // the toilet
+	Box(ESurface::InteriorWall, 138.0f, -480.0f, Z1 + 40.0f, 160.0f, -472.0f, Z1 + 95.0f);      // its tank
 	// The back door upstairs: a door in the rear wall that opens on nothing, just a drop to the yard.
 	{
 		FWall Back; Back.bAlongX = true; Back.Fixed = -HY; Back.From = -70.0f; Back.To = 70.0f; Back.Thickness = OuterWall; Back.bExterior = true;
@@ -847,23 +842,27 @@ FHouse GenerateFamilyHouse1719()
 		House.Pieces.Add(Cap);
 		Box(ESurface::Wood, -60.0f, -HY - 9.0f, Z1 - 4.0f, 60.0f, -HY + 12.0f, Z1);                       // sill, then the drop
 	}
-	// Railing around the stair opening.
-	Box(ESurface::Wood, -46.0f, -94.0f, Z1, -40.0f, 270.0f, Z1 + 95.0f);
-	Box(ESurface::Wood, 40.0f, -94.0f, Z1, 46.0f, 270.0f, Z1 + 95.0f);
-	Box(ESurface::Wood, -46.0f, -94.0f, Z1, 46.0f, -88.0f, Z1 + 95.0f);
-	// Boys' room (west): bunk bed and toys.
-	Box(ESurface::Wood, -HX + 12.0f, 20.0f, Z1, -HX + 22.0f, 220.0f, Z1 + 170.0f);
-	Box(ESurface::Wood, -HX + 92.0f, 20.0f, Z1, -HX + 102.0f, 220.0f, Z1 + 170.0f);
-	Box(ESurface::Wood, -HX + 12.0f, 20.0f, Z1 + 30.0f, -HX + 102.0f, 220.0f, Z1 + 36.0f);
-	Box(ESurface::Wood, -HX + 12.0f, 20.0f, Z1 + 110.0f, -HX + 102.0f, 220.0f, Z1 + 116.0f);
-	Box(ESurface::InteriorWall, -HX + 16.0f, 24.0f, Z1 + 36.0f, -HX + 98.0f, 216.0f, Z1 + 52.0f);
-	Box(ESurface::InteriorWall, -HX + 16.0f, 24.0f, Z1 + 116.0f, -HX + 98.0f, 216.0f, Z1 + 132.0f);
+	// Railing around the stair opening (the stairs climb toward the back door).
+	Box(ESurface::Wood, -46.0f, -464.0f, Z1, -40.0f, -94.0f, Z1 + 95.0f);
+	Box(ESurface::Wood, 40.0f, -464.0f, Z1, 46.0f, -94.0f, Z1 + 95.0f);
+	Box(ESurface::Wood, -46.0f, -100.0f, Z1, 46.0f, -94.0f, Z1 + 95.0f);
+	// Boys' room (west): two mattresses on the floor, no bunks or visible frames; toys.
+	Tinted(ESurface::InteriorWall, FLinearColor(0.55f, 0.65f, 1.1f), -HX + 14.0f, 10.0f, Z1, -HX + 204.0f, 100.0f, Z1 + 22.0f);
+	Tinted(ESurface::InteriorWall, FLinearColor(1.05f, 0.55f, 0.45f), -HX + 14.0f, 120.0f, Z1, -HX + 204.0f, 210.0f, Z1 + 22.0f);
 	Box(ESurface::Wood, -HX + 12.0f, -200.0f, Z1, -HX + 82.0f, -150.0f, Z1 + 45.0f);      // toy chest
 	Box(ESurface::Stone, -300.0f, -100.0f, Z1, -270.0f, -70.0f, Z1 + 22.0f);
 	Put(EFurniture::Drawers, -HX + 40.0f, -60.0f, 0.0f, Z1);
 	Put(EFurniture::CeilingLamp, -240.0f, 0.0f, 0.0f, Z1 + 200.0f);
 	// Girl's room (east) in the dormer: bed, dolls, shelf; the dormer box juts from the front slope.
-	Put(EFurniture::Bed, HX - 111.0f, -80.0f, 180.0f, Z1);
+	// A fold-up cot in the dormer: a thin mattress on flimsy metal legs (it folded in half if you sat on one side).
+	Tinted(ESurface::InteriorWall, FLinearColor(0.9f, 0.55f, 0.75f), 245.0f, 240.0f, Z1 + 32.0f, 320.0f, 410.0f, Z1 + 40.0f);
+	for (const float X : { 247.0f, 316.0f })
+	{
+		for (const float Y : { 242.0f, 406.0f })
+		{
+			Tinted(ESurface::Stone, FLinearColor(0.5f, 0.5f, 0.52f), X - 2.0f, Y - 2.0f, Z1, X + 2.0f, Y + 2.0f, Z1 + 32.0f);
+		}
+	}
 	Put(EFurniture::Nightstand, HX - 40.0f, -190.0f, 180.0f, Z1);
 	Box(ESurface::Stone, 200.0f, -180.0f, Z1, 240.0f, -150.0f, Z1 + 28.0f);
 	Put(EFurniture::Shelf, 260.0f, 285.0f, 90.0f, Z1);

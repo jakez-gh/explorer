@@ -542,10 +542,16 @@ def carpet_tri(texture, size_cm, normal=False):
 
 
 if fibre_d:
-    pile = carpet_tri(fibre_d, 60.0)
-    carpet = g.mul(carpet, g.mul(pile, g.const(1.7)))
-    lib.connect_material_property(carpet_tri(fibre_n, 60.0, normal=True), "", MP.MP_NORMAL)
-    lib.connect_material_property(g.mask(carpet_tri(fibre_r, 60.0), r=True), "", MP.MP_ROUGHNESS)
+    # Organic, hairy look: two scales of scanned fibre, plus meandering "trails" where the pile is crushed lower
+    # (a band around the mid-level of slow noise), which read flatter, darker and glossier.
+    trail_n = carpet_noise(90.0)
+    band = g.link(g.op(unreal.MaterialExpressionSubtract, trail_n, g.const(0.5)), g.node(unreal.MaterialExpressionAbs))
+    trail = g.saturate(g.op(unreal.MaterialExpressionSubtract, g.const(1.0), g.mul(band, g.const(9.0))))
+    pile = g.mul(g.add(carpet_tri(fibre_d, 60.0), carpet_tri(fibre_d, 23.0)), g.const(0.5))
+    carpet = g.mul(carpet, g.mul(pile, g.mul(g.const(1.7), g.op(unreal.MaterialExpressionSubtract, g.const(1.0), g.mul(trail, g.const(0.3))))))
+    fuzz = g.lerp(carpet_tri(fibre_n, 60.0, normal=True), carpet_tri(fibre_n, 23.0, normal=True), g.const(0.5))
+    lib.connect_material_property(g.lerp(fuzz, g.color(0.0, 0.0, 1.0), g.mul(trail, g.const(0.65))), "", MP.MP_NORMAL)
+    lib.connect_material_property(g.lerp(g.mask(carpet_tri(fibre_r, 60.0), r=True), g.const(0.62), g.mul(trail, g.const(0.5))), "", MP.MP_ROUGHNESS)
 else:
     lib.connect_material_property(g.const(0.97), "", MP.MP_ROUGHNESS)
 lib.connect_material_property(carpet, "", MP.MP_BASE_COLOR)
