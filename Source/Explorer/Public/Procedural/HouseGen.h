@@ -26,6 +26,7 @@ namespace HouseGen
 		SlateRoof,
 		Wood,           // frames, doors, stairs, trim
 		Carpet,         // procedural brown carpet with tiny round spots of tan and dark brown
+		Siding,         // horizontal vinyl lap siding (procedural)
 		Glass,
 		Count
 	};

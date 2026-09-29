@@ -564,6 +564,29 @@ mi = tools.create_asset("MI_Carpet", f"{FOLDER}/Building", unreal.MaterialInstan
 lib.set_material_instance_parent(mi, carpet_parent)
 unreal.EditorAssetLibrary.save_loaded_asset(mi)
 
+# Horizontal vinyl lap siding: 20 cm boards with a shadow line under each, from world height. Tinted per instance.
+m = new_material("M_Siding")
+m.set_editor_property("used_with_instanced_static_meshes", True)
+g = Graph(m)
+cd = [g.node(unreal.MaterialExpressionPerInstanceCustomData, data_index=i) for i in range(3)]
+tint = g.op(unreal.MaterialExpressionAppendVector, g.op(unreal.MaterialExpressionAppendVector, cd[0], cd[1]), cd[2])
+wp = g.node(unreal.MaterialExpressionWorldPosition)
+board = g.link(g.mul(g.mask(wp, b=True), g.const(1.0 / 20.0)), g.node(unreal.MaterialExpressionFrac))
+edge = g.saturate(g.mul(board, g.const(9.0)))            # dark groove at the bottom of each board, then lit face
+face = g.op(unreal.MaterialExpressionAdd, g.const(0.62), g.mul(edge, g.const(0.38)))
+grain_xy, _, _ = g.world_uvs(40.0)
+grain = g.mask(g.sample(tex("T_Perlin_Noise_M"), grain_xy), r=True)
+shade = g.mul(face, g.op(unreal.MaterialExpressionAdd, g.const(0.93), g.mul(grain, g.const(0.14))))
+lib.connect_material_property(g.mul(shade, tint), "", MP.MP_BASE_COLOR)
+lib.connect_material_property(g.const(0.55), "", MP.MP_ROUGHNESS)
+finish(m)
+path = f"{FOLDER}/Building/MI_Siding"
+if unreal.EditorAssetLibrary.does_asset_exist(path):
+    unreal.EditorAssetLibrary.delete_asset(path)
+mi = tools.create_asset("MI_Siding", f"{FOLDER}/Building", unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
+lib.set_material_instance_parent(mi, m)
+unreal.EditorAssetLibrary.save_loaded_asset(mi)
+
 # Window glass: see-through, slightly reflective.
 m = new_material("M_Glass")
 m.set_editor_property("used_with_instanced_static_meshes", True)

@@ -678,7 +678,7 @@ FHouse GenerateFamilyHouse1719()
 	const float Knee = 130.0f;
 	House.Width = HX * 2.0f;
 	House.Depth = HY * 2.0f;
-	FBuilder B{ House, ESurface::ExteriorWall };
+	FBuilder B{ House, ESurface::Siding };
 	B.bShutters = false;
 	B.bWhiteFrames = true;
 	auto Box = [&](ESurface S, float X0, float Y0, float Z0, float X1, float Y1, float Z1)
@@ -1058,9 +1058,14 @@ FHouse GenerateFamilyHouse1719()
 		Box(ESurface::PlankFloor, PX0, HY, -8.0f, PX1, PY, 0.0f);
 		FWall Front; Front.bAlongX = true; Front.Fixed = PY; Front.From = PX0; Front.To = PX1; Front.Thickness = 14.0f; Front.bExterior = true;
 		Front.Openings.Add({ 0.0f, 100.0f, 0.0f, DoorHeight, false });
-		for (const float X : { -330.0f, -260.0f, -90.0f, 90.0f, 260.0f, 330.0f })
+		// Two wide banks of double windows either side of the door, plus a narrow light next to it.
+		for (const float X : { -340.0f, -220.0f, 220.0f, 340.0f })
 		{
-			Front.Openings.Add({ X, 60.0f, 95.0f, 225.0f, true });
+			Front.Openings.Add({ X, 105.0f, 95.0f, 225.0f, true });
+		}
+		for (const float X : { -95.0f, 95.0f })
+		{
+			Front.Openings.Add({ X, 40.0f, 95.0f, 225.0f, true });
 		}
 		B.Wall(Front, 0.0f, 240.0f);
 		FWall WestW; WestW.bAlongX = false; WestW.Fixed = PX0; WestW.From = HY; WestW.To = PY; WestW.Thickness = 14.0f; WestW.bExterior = true;
@@ -1151,6 +1156,15 @@ FHouse GenerateFamilyHouse1719()
 		const float FenceX = 780.0f, FenceFront = HY + 520.0f, FenceBack = GY - GHY - 650.0f;
 		auto Post = [&](float X, float Y) { Tinted(ESurface::Stone, FLinearColor(0.55f, 0.55f, 0.55f), X - 3.0f, Y - 3.0f, 0.0f, X + 3.0f, Y + 3.0f, 112.0f); };
 		auto Mesh = [&](float X0, float Y0, float X1, float Y1) { Tinted(ESurface::Glass, FLinearColor(0.7f, 0.7f, 0.7f), X0, Y0, 5.0f, X1, Y1, 105.0f); };
+		auto Rails = [&](float X0, float Y0, float X1, float Y1)
+		{
+			for (const float Z : { 8.0f, 55.0f, 108.0f }) Tinted(ESurface::Stone, FLinearColor(0.6f, 0.6f, 0.62f), X0, Y0, Z, X1, Y1, Z + 2.5f);
+		};
+		Rails(-FenceX, FenceBack, -FenceX + 1.5f, FenceFront);
+		Rails(FenceX - 1.5f, FenceBack, FenceX, FenceFront);
+		Rails(-FenceX, FenceBack, FenceX, FenceBack + 1.5f);
+		Rails(-FenceX, FenceFront - 1.5f, -150.0f, FenceFront);
+		Rails(150.0f, FenceFront - 1.5f, FenceX, FenceFront);
 		for (float Y = FenceBack; Y <= FenceFront; Y += 300.0f)
 		{
 			Post(-FenceX, Y); Post(FenceX, Y);

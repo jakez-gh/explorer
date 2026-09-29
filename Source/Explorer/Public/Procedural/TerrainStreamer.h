@@ -121,7 +121,7 @@ private:
 		Trunk, // invisible collider around tree trunks
 		IslandBush, // foliage on floating islands, which never fades with distance
 		BuildSurf0, // house walls, floors, roofs... one per HouseGen::ESurface, photoscanned materials
-		Furniture0 = BuildSurf0 + 12, // one per HouseGen::EFurniture, CC0 scanned furniture
+		Furniture0 = BuildSurf0 + 13, // one per HouseGen::EFurniture, CC0 scanned furniture
 		Tree0 = Furniture0 + 17, Tree1, Tree2, Tree3, Tree4, Tree5, Tree6, Tree7, // runtime-built tree wood meshes
 		IslandTree, // broadleaf wood that never fades, for floating islands
 		Island0, Island1, Island2, Island3, // runtime-built floating island meshes
