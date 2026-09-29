@@ -98,7 +98,7 @@ protected:
 
 	// Lowest height held above ground or water (you can skim among the trees).
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
-	float MinGroundClearance = 200.0f;
+	float MinGroundClearance = 110.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Flight|Altitude")
 	float MaxAltitude = 50000.0f;

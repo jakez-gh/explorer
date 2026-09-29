@@ -48,6 +48,9 @@ namespace
 	constexpr double LighthouseCell = 500000.0;
 	constexpr double StoneCircleCell = 400000.0;
 	constexpr double StoneCircleRadius = 2500.0;
+	// Houses and their furniture are built to human scale, then enlarged so the world feels grand.
+	constexpr float HouseScale = 1.0f;
+	constexpr float TreeScale = 1.0f;
 	constexpr double RuinCell = 600000.0;
 	constexpr double RuinRadius = 6000.0;
 	constexpr double ObeliskCell = 700000.0;
@@ -335,6 +338,8 @@ void ATerrainStreamer::BeginPlay()
 			TEXT("wall_clock"), TEXT("scandinavian_masonry_heater"), TEXT("modern_ceiling_lamp_01") };
 		static_assert(UE_ARRAY_COUNT(Models) == static_cast<int32>(HouseGen::EFurniture::Count), "one model per furniture type");
 		IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		// The registry scans in the background in -game; wait for these folders.
+		Registry.ScanPathsSynchronous({ TEXT("/Game/PolyHaven/Models") }, true);
 		for (int32 i = 0; i < UE_ARRAY_COUNT(Models); ++i)
 		{
 			TArray<FAssetData> Assets;
@@ -354,6 +359,7 @@ void ATerrainStreamer::BeginPlay()
 					}
 				}
 			}
+			UE_LOG(LogTemp, Display, TEXT("Furniture %s: %s (%d assets)"), Models[i], Best ? *Best->GetName() : TEXT("MISSING"), Assets.Num());
 			PartMeshes[Furniture0 + i] = Best ? Best : PartMeshes[Cube].Get();
 			PartMaterials[Furniture0 + i] = Best ? nullptr : PartMaterials[Cube].Get();
 		}
@@ -1510,7 +1516,7 @@ void ATerrainStreamer::ComputeProps(const FIntPoint& Coord, EProps Level, FJobRe
 			if (Part >= Furniture0)
 			{
 				const FVector Pivot(Bounds.GetCenter().X, Bounds.GetCenter().Y, Bounds.Min.Z);
-				Transforms.Add(FTransform(Instance.Rotation, Instance.Center - Instance.Rotation.RotateVector(Pivot), FVector::OneVector));
+				Transforms.Add(FTransform(Instance.Rotation, Instance.Center - Instance.Rotation.RotateVector(Pivot * Instance.Size), Instance.Size));
 				continue;
 			}
 			const FVector Scale = Instance.Size / MeshSize;
@@ -1625,8 +1631,8 @@ void ATerrainStreamer::AddVegetation(const FIntPoint& Coord, FPropBatch& Batch, 
 					const TArray<int32>& Pool = bYoung ? YoungSlots : MatureSlots;
 					const int32 Slot = Pool[FMath::Min(FMath::FloorToInt(Tint * Pool.Num()), Pool.Num() - 1)];
 					// Scanned at real size; vary a little, and sink the root flare into the ground.
-					const float Scale = bYoung ? FMath::Lerp(0.75f, 1.0f, WorldGen::HashFloat(CX, CY, SeedTreeSize))
-						: FMath::Lerp(0.85f, 1.1f, WorldGen::HashFloat(CX, CY, SeedTreeSize));
+					const float Scale = TreeScale * (bYoung ? FMath::Lerp(0.75f, 1.0f, WorldGen::HashFloat(CX, CY, SeedTreeSize))
+						: FMath::Lerp(0.85f, 1.1f, WorldGen::HashFloat(CX, CY, SeedTreeSize)));
 					Batch.Add(static_cast<EPropPart>(Scanned0 + Slot), Ground - FVector(0, 0, 25.0f), Spin, FVector(Scale), White);
 					if (!bTreesOnly)
 					{
@@ -1818,10 +1824,10 @@ void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) co
 			{
 				FRandom House{ CX * 131 + i, CY, SeedVillage + 1 };
 				const float Angle = House.Range(0.0f, 2.0f * PI);
-				const float Radius = i == 0 ? 0.0f : 2500.0f + 17000.0f * FMath::Sqrt(House.Next());
+				const float Radius = i == 0 ? 0.0f : HouseScale * (2500.0f + 17000.0f * FMath::Sqrt(House.Next()));
 				const FVector Pos = Center + FVector(FMath::Cos(Angle) * Radius, FMath::Sin(Angle) * Radius, 0.0);
 				const float Yaw = House.Range(0.0f, 360.0f);
-				const float Footprint = i == 0 ? 1000.0f : 850.0f;
+				const float Footprint = HouseScale * (i == 0 ? 1500.0f : 850.0f);
 				bool bOverlaps = false;
 				for (const FVector4& P : Placed)
 				{
@@ -1844,19 +1850,29 @@ void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) co
 
 				if (i == 0)
 				{
-					// A stone church or temple at the heart of the village.
-					const FLinearColor Stone = bAdobe ? FLinearColor(1.5f, 1.25f, 0.95f) : FLinearColor(1.3f, 1.28f, 1.22f);
-					Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + 650.0f), FRotator(0, Yaw, 0), FVector(900, 1500, 1500), Stone, 0.0f, bAdobe ? SurfConcrete : SurfRock);
-					if (bAdobe)
+					// A church at the heart of the village, with an interior (see HouseGen::GenerateChurch).
+					const HouseGen::FHouse Church = HouseGen::GenerateChurch(WorldGen::Hash(CX * 131, CY, SeedVillage + 4), bAdobe ? HouseGen::EStyle::Plaster : HouseGen::EStyle::Brick);
+					const FQuat ChurchQuat = FRotator(0.0f, Yaw, 0.0f).Quaternion();
+					float ChurchHigh = Ground;
+					for (const FVector2D Corner : { FVector2D(-1, -1), FVector2D(1, -1), FVector2D(-1, 1), FVector2D(1, 1) })
 					{
-						Batch.Add(Sphere, FVector(Pos.X, Pos.Y, Ground + 1400.0f), FRotator::ZeroRotator, FVector(850, 850, 850), FLinearColor(1.7f, 1.6f, 1.45f), 0.0f, SurfConcrete);
+						const FVector C = FVector(Pos.X, Pos.Y, 0.0) + ChurchQuat.RotateVector(FVector(Corner.X * Church.Width * 0.5f, Corner.Y * Church.Depth * 0.5f, 0.0f) * HouseScale);
+						ChurchHigh = FMath::Max(ChurchHigh, WorldGen::Height(C.X, C.Y));
 					}
-					else
+					const FVector ChurchBase(Pos.X, Pos.Y, ChurchHigh + 40.0f * HouseScale);
+					for (const HouseGen::FPiece& Piece : Church.Pieces)
 					{
-						Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + 1400.0f), FRotator(0, Yaw, 45), FVector(1500, 900 / UE_SQRT_2 + 40, 900 / UE_SQRT_2 + 40), Roofs[1], 0.0f, SurfSlate);
-						const FVector Tower = FRotator(0, Yaw, 0).RotateVector(FVector(0, 800, 0));
-						Batch.Add(Cube, FVector(Pos.X, Pos.Y, Ground + 1200.0f) + Tower, FRotator(0, Yaw, 0), FVector(450, 450, 2500), Stone, 0.0f, SurfRock);
-						Batch.Add(Cone, FVector(Pos.X, Pos.Y, Ground + 2450.0f + 500.0f) + Tower, FRotator(0, Yaw, 0), FVector(520, 520, 1000), Roofs[1], 0.0f, SurfSlate);
+						const FVector World = ChurchBase + ChurchQuat.RotateVector(Piece.Center * HouseScale);
+						const FRotator PieceRot = (ChurchQuat * Piece.Rotation.Quaternion()).Rotator();
+						FVector Size = Piece.Size * HouseScale;
+						FVector Mid = World;
+						if (Piece.Surface == HouseGen::ESurface::Stone && Piece.Center.Z < 0.0f)
+						{
+							const float Extra = ChurchHigh - Ground + 150.0f;
+							Size.Z += Extra;
+							Mid.Z -= Extra * 0.5f;
+						}
+						Batch.Add(static_cast<EPropPart>(BuildSurf0 + static_cast<int32>(Piece.Surface)), Mid, PieceRot, Size, White);
 					}
 					continue;
 				}
@@ -1871,10 +1887,10 @@ void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) co
 				float High = Ground;
 				for (const FVector2D Corner : { FVector2D(-1, -1), FVector2D(1, -1), FVector2D(-1, 1), FVector2D(1, 1) })
 				{
-					const FVector C = FVector(Pos.X, Pos.Y, 0.0) + Rot.RotateVector(FVector(Corner.X * Plan.Width * 0.5f, Corner.Y * Plan.Depth * 0.5f, 0.0f));
+					const FVector C = FVector(Pos.X, Pos.Y, 0.0) + Rot.RotateVector(FVector(Corner.X * Plan.Width * 0.5f, Corner.Y * Plan.Depth * 0.5f, 0.0f) * HouseScale);
 					High = FMath::Max(High, WorldGen::Height(C.X, C.Y));
 				}
-				const FVector Base(Pos.X, Pos.Y, High + 40.0f);
+				const FVector Base(Pos.X, Pos.Y, High + 40.0f * HouseScale);
 				static const bool bReportHouses = FParse::Param(FCommandLine::Get(), TEXT("HouseReport"));
 				if (bReportHouses)
 				{
@@ -1884,14 +1900,14 @@ void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) co
 				const FQuat HouseQuat = Rot.Quaternion();
 				for (const HouseGen::FPiece& Piece : Plan.Pieces)
 				{
-					const FVector World = Base + HouseQuat.RotateVector(Piece.Center);
+					const FVector World = Base + HouseQuat.RotateVector(Piece.Center * HouseScale);
 					const FRotator PieceRot = (HouseQuat * Piece.Rotation.Quaternion()).Rotator();
 					if (Piece.bFurniture)
 					{
-						Batch.Add(static_cast<EPropPart>(Furniture0 + static_cast<int32>(Piece.Furniture)), World, PieceRot, FVector::OneVector, White);
+						Batch.Add(static_cast<EPropPart>(Furniture0 + static_cast<int32>(Piece.Furniture)), World, PieceRot, FVector(HouseScale), White);
 						continue;
 					}
-					FVector Size = Piece.Size;
+					FVector Size = Piece.Size * HouseScale;
 					FVector Mid = World;
 					// Extend the plinth down to the terrain on sloping ground.
 					if (Piece.Surface == HouseGen::ESurface::Stone && Piece.Center.Z < 0.0f)

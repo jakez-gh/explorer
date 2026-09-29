@@ -64,4 +64,7 @@ namespace HouseGen
 
 	// Seed picks size, style and layout. Footprint is roughly Width x Depth (cm).
 	FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys);
+
+	// A village church with a nave, pews, altar, and a bell tower over the entrance. Front door on +Y.
+	FHouse GenerateChurch(uint32 Seed, EStyle Style);
 }

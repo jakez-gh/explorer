@@ -24,7 +24,7 @@ AFlightPawn::AFlightPawn()
 	bUseControllerRotationRoll = false;
 
 	CollisionComponent = CreateDefaultSubobject<USphereComponent>(TEXT("Collision"));
-	CollisionComponent->InitSphereRadius(30.0f);
+	CollisionComponent->InitSphereRadius(18.0f);
 	CollisionComponent->SetCollisionProfileName(UCollisionProfile::Pawn_ProfileName);
 	RootComponent = CollisionComponent;
 

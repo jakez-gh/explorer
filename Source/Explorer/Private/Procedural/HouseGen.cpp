@@ -553,4 +553,156 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys)
 	House.Height = Top + SlabThickness + RiseH;
 	return House;
 }
+FHouse GenerateChurch(uint32 Seed, EStyle Style)
+{
+	FHouse House;
+	FRand Rand{ Seed };
+	const float W = FMath::GridSnap(Rand.Range(950.0f, 1150.0f), 10.0f);
+	const float D = FMath::GridSnap(Rand.Range(2000.0f, 2400.0f), 10.0f);
+	const float WallH = 780.0f;
+	const float HX = W * 0.5f, HY = D * 0.5f;
+	House.Width = W;
+	House.Depth = D;
+	FBuilder B{ House, Style == EStyle::Brick ? ESurface::BrickWall : Style == EStyle::Timber ? ESurface::TimberWall : ESurface::ExteriorWall };
+
+	B.Box(ESurface::Stone, FVector(-HX - 25.0f, -HY - 25.0f, -60.0f), FVector(HX + 25.0f, HY + 25.0f, 0.0f));
+	B.Box(ESurface::TileFloor, FVector(-HX, -HY, -20.0f), FVector(HX, HY, 0.0f));
+
+	// Nave walls: tall windows down both sides, one high window behind the altar.
+	for (int32 Side = 0; Side < 4; ++Side)
+	{
+		FWall Wall;
+		Wall.bAlongX = Side >= 2;
+		Wall.Fixed = Side == 0 ? -HX : Side == 1 ? HX : Side == 2 ? -HY : HY;
+		Wall.From = Wall.bAlongX ? -HX : -HY;
+		Wall.To = Wall.bAlongX ? HX : HY;
+		Wall.Thickness = OuterWall + 10.0f;
+		Wall.bExterior = true;
+		if (Side < 2)
+		{
+			const int32 Count = 5;
+			for (int32 k = 0; k < Count; ++k)
+			{
+				const float At = FMath::Lerp(-HY + 350.0f, HY - 350.0f, (k + 0.5f) / Count);
+				Wall.Openings.Add({ At, 120.0f, 200.0f, 600.0f, true });
+			}
+		}
+		else if (Side == 3)
+		{
+			Wall.Openings.Add({ 0.0f, 180.0f, 0.0f, 340.0f, false });
+		}
+		else
+		{
+			Wall.Openings.Add({ 0.0f, 140.0f, 620.0f, 740.0f, true });
+		}
+		B.Wall(Wall, 0.0f, WallH);
+	}
+
+	// Bell tower over the entrance: three more walls making a vestibule, then a stepped spire.
+	const float TW = 240.0f, TD = 480.0f, TowerH = 1500.0f;
+	{
+		FWall Front;
+		Front.bAlongX = true; Front.Fixed = HY + TD; Front.From = -TW; Front.To = TW; Front.Thickness = OuterWall; Front.bExterior = true;
+		Front.Openings.Add({ 0.0f, 180.0f, 0.0f, 340.0f, false });
+		FWall Left;
+		Left.bAlongX = false; Left.Fixed = -TW; Left.From = HY; Left.To = HY + TD; Left.Thickness = OuterWall; Left.bExterior = true;
+		FWall Right = Left;
+		Right.Fixed = TW;
+		B.Wall(Front, 0.0f, TowerH);
+		B.Wall(Left, 0.0f, TowerH);
+		B.Wall(Right, 0.0f, TowerH);
+		B.Box(ESurface::TileFloor, FVector(-TW, HY, -20.0f), FVector(TW, HY + TD, 0.0f));
+		B.Box(ESurface::Stone, FVector(-TW - 25.0f, HY, -60.0f), FVector(TW + 25.0f, HY + TD + 25.0f, -20.0f));
+		B.Box(ESurface::InteriorWall, FVector(-TW, HY, WallH), FVector(TW, HY + TD, WallH + SlabThickness));
+		const int32 Steps = 16;
+		for (int32 i = 0; i < Steps; ++i)
+		{
+			const float T = 1.0f - static_cast<float>(i) / Steps;
+			const float Z0 = TowerH + i * 90.0f;
+			B.Box(ESurface::SlateRoof, FVector(-TW * T - 20.0f, HY + TD * 0.5f - TD * 0.5f * T - 20.0f, Z0), FVector(TW * T + 20.0f, HY + TD * 0.5f + TD * 0.5f * T + 20.0f, Z0 + 92.0f));
+		}
+	}
+
+	// Pews in two banks either side of a central aisle, facing the altar at the -Y end.
+	const float Aisle = 200.0f;
+	for (int32 Row = 0; Row < 8; ++Row)
+	{
+		const float Y = -HY + 700.0f + Row * 150.0f;
+		for (const float Sx : { -1.0f, 1.0f })
+		{
+			const float X0 = Sx * (Aisle * 0.5f + 20.0f);
+			const float X1 = Sx * (HX - 60.0f);
+			const float Lo = FMath::Min(X0, X1), Hi = FMath::Max(X0, X1);
+			B.Box(ESurface::Wood, FVector(Lo, Y, 42.0f), FVector(Hi, Y + 45.0f, 50.0f));
+			B.Box(ESurface::Wood, FVector(Lo, Y + 40.0f, 50.0f), FVector(Hi, Y + 48.0f, 105.0f));
+			B.Box(ESurface::Wood, FVector(Lo, Y + 5.0f, 0.0f), FVector(Lo + 8.0f, Y + 40.0f, 42.0f));
+			B.Box(ESurface::Wood, FVector(Hi - 8.0f, Y + 5.0f, 0.0f), FVector(Hi, Y + 40.0f, 42.0f));
+		}
+	}
+	// Chancel: raised step, altar, lectern and a cross on the end wall.
+	B.Box(ESurface::Stone, FVector(-HX + 12.0f, -HY + 12.0f, 0.0f), FVector(HX - 12.0f, -HY + 480.0f, 25.0f));
+	B.Box(ESurface::Stone, FVector(-120.0f, -HY + 100.0f, 25.0f), FVector(120.0f, -HY + 190.0f, 115.0f));
+	B.Box(ESurface::Wood, FVector(-14.0f, -HY + 14.0f, 300.0f), FVector(14.0f, -HY + 22.0f, 560.0f));
+	B.Box(ESurface::Wood, FVector(-90.0f, -HY + 14.0f, 450.0f), FVector(90.0f, -HY + 22.0f, 478.0f));
+	B.Box(ESurface::Wood, FVector(HX - 150.0f, -HY + 260.0f, 25.0f), FVector(HX - 90.0f, -HY + 320.0f, 130.0f));
+
+	// Buttresses between the windows, cornice bands, pointed stone heads over the windows and belfry louvres.
+	for (const float Sx : { -1.0f, 1.0f })
+	{
+		for (int32 k = 0; k <= 5; ++k)
+		{
+			const float Y = FMath::Lerp(-HY + 350.0f, HY - 350.0f, k / 5.0f) - 0.5f * (HY * 2.0f - 700.0f) / 5.0f;
+			if (Y < -HY + 40.0f || Y > HY - 40.0f) continue;
+			B.Box(ESurface::Stone, FVector(FMath::Min(Sx * (HX + 8.0f), Sx * (HX + 62.0f)), Y - 22.0f, 0.0f), FVector(FMath::Max(Sx * (HX + 8.0f), Sx * (HX + 62.0f)), Y + 22.0f, 470.0f));
+			B.Box(ESurface::Stone, FVector(FMath::Min(Sx * (HX + 8.0f), Sx * (HX + 40.0f)), Y - 18.0f, 470.0f), FVector(FMath::Max(Sx * (HX + 8.0f), Sx * (HX + 40.0f)), Y + 18.0f, 700.0f));
+		}
+		for (int32 k = 0; k < 5; ++k)
+		{
+			const float At = FMath::Lerp(-HY + 350.0f, HY - 350.0f, (k + 0.5f) / 5.0f);
+			const float Widths[] = { 150.0f, 110.0f, 70.0f, 30.0f };
+			for (int32 j = 0; j < 4; ++j)
+			{
+				B.Box(ESurface::Stone, FVector(FMath::Min(Sx * (HX + 8.0f), Sx * (HX + 22.0f)), At - Widths[j] * 0.5f, 600.0f + j * 28.0f), FVector(FMath::Max(Sx * (HX + 8.0f), Sx * (HX + 22.0f)), At + Widths[j] * 0.5f, 628.0f + j * 28.0f));
+			}
+		}
+	}
+	for (const float Sy : { -1.0f, 1.0f })
+	{
+		B.Box(ESurface::Stone, FVector(-HX - 30.0f, FMath::Min(Sy * (HY + 8.0f), Sy * (HY + 30.0f)), WallH - 30.0f), FVector(HX + 30.0f, FMath::Max(Sy * (HY + 8.0f), Sy * (HY + 30.0f)), WallH));
+	}
+	for (const float Sx : { -1.0f, 1.0f })
+	{
+		B.Box(ESurface::Stone, FVector(FMath::Min(Sx * (HX + 8.0f), Sx * (HX + 30.0f)), -HY - 30.0f, WallH - 30.0f), FVector(FMath::Max(Sx * (HX + 8.0f), Sx * (HX + 30.0f)), HY + 30.0f, WallH));
+		B.Box(ESurface::Wood, FVector(Sx * (TW + 6.0f) - 6.0f, HY + TD * 0.5f - 50.0f, 1050.0f), FVector(Sx * (TW + 6.0f) + 6.0f, HY + TD * 0.5f + 50.0f, 1380.0f));
+	}
+	B.Box(ESurface::Wood, FVector(-50.0f, HY + TD + 6.0f - 6.0f, 1050.0f), FVector(50.0f, HY + TD + 6.0f + 6.0f, 1380.0f));
+	B.Box(ESurface::Stone, FVector(-TW - 30.0f, HY + TD, 780.0f), FVector(TW + 30.0f, HY + TD + 30.0f, 810.0f));
+	// Stepped cornice under the tower's belfry.
+	B.Box(ESurface::Stone, FVector(-TW - 25.0f, HY - 10.0f, TowerH - 30.0f), FVector(TW + 25.0f, HY + TD + 25.0f, TowerH));
+	// Pitched roof, ridge along the nave, gables at both ends.
+	const float Pitch = 40.0f;
+	const float RiseH = HX * FMath::Tan(FMath::DegreesToRadians(Pitch));
+	const int32 Courses = 30;
+	for (int32 c = 0; c < Courses; ++c)
+	{
+		const float Z0 = WallH + c * RiseH / Courses;
+		const float Half = HX * (1.0f - (c + 0.5f) / Courses);
+		for (const float Sy : { -1.0f, 1.0f })
+		{
+			B.Box(B.OuterSurface, FVector(-Half, Sy * HY - OuterWall * 0.5f, Z0), FVector(Half, Sy * HY + OuterWall * 0.5f, Z0 + RiseH / Courses));
+		}
+	}
+	const float Slope = FMath::Sqrt(HX * HX + RiseH * RiseH) + 60.0f;
+	for (const float Sx : { -1.0f, 1.0f })
+	{
+		FPiece P;
+		P.Surface = ESurface::SlateRoof;
+		P.Center = FVector(Sx * HX * 0.5f, 0.0f, WallH + RiseH * 0.5f + 12.0f);
+		P.Size = FVector(D + 80.0f, Slope, 14.0f);
+		P.Rotation = FRotator(0.0f, 90.0f, -Sx * Pitch);
+		House.Pieces.Add(P);
+	}
+	House.Height = TowerH + 16 * 90.0f;
+	return House;
+}
 }
