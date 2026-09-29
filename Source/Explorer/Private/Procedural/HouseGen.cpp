@@ -598,26 +598,47 @@ FHouse GenerateFamilyHouse1719()
 	const FLinearColor Black(0.03f, 0.03f, 0.03f), Orange(1.6f, 0.45f, 0.06f), Cinder(0.95f, 0.95f, 0.92f), AsphaltC(0.12f, 0.12f, 0.13f);
 
 	struct FHole { float X0, Y0, X1, Y1; };
-	// Brown-and-tan carpet: flat patches of colour (no swirls), 30-100 cm across, laid on a fixed 60 x 55 cm grid;
-	// the same carpet covers the front room, the stairs and the whole upper floor. Cells touching Skip are left out.
-	auto Carpet = [&](float X0, float Y0, float X1, float Y1, float Z, const FHole* Skip)
+	// Brown-and-tan carpet, the same on the front room, the stairs and the whole upper floor: a mid-brown base laid in
+	// 30 cm plates, with roundish (octagonal) patches of darker and lighter brown on top at slightly different heights
+	// so overlapping patches never z-fight. Areas touching a Skip rectangle are left bare.
+	auto Carpet = [&](float X0, float Y0, float X1, float Y1, float Z, std::initializer_list<FHole> Skips)
 	{
-		const FLinearColor Brown(0.22f, 0.13f, 0.07f), Mid(0.45f, 0.30f, 0.17f), TanC(0.88f, 0.70f, 0.47f);
-		for (int32 i = 0; -HX + 12.0f + i * 60.0f < X1; ++i)
+		auto Skipped = [&](float A0, float B0, float A1, float B1)
 		{
-			for (int32 j = 0; -HY + 12.0f + j * 55.0f < Y1; ++j)
+			for (const FHole& H : Skips) if (A1 > H.X0 && A0 < H.X1 && B1 > H.Y0 && B0 < H.Y1) return true;
+			return false;
+		};
+		const FLinearColor Base(0.36f, 0.23f, 0.12f);
+		for (float X = X0; X < X1 - 1.0f; X += 30.0f)
+		{
+			for (float Y = Y0; Y < Y1 - 1.0f; Y += 30.0f)
 			{
-				for (int32 k = 0; k < 2; ++k)
+				const float A1 = FMath::Min(X + 30.0f, X1), B1 = FMath::Min(Y + 30.0f, Y1);
+				if (!Skipped(X, Y, A1, B1)) Tinted(ESurface::InteriorWall, Base, X, Y, Z, A1, B1, Z + 1.0f);
+			}
+		}
+		const FLinearColor Shades[] = { FLinearColor(0.20f, 0.11f, 0.06f), FLinearColor(0.50f, 0.34f, 0.19f), FLinearColor(0.72f, 0.54f, 0.34f), FLinearColor(0.28f, 0.17f, 0.09f) };
+		for (int32 i = 0; X0 + i * 50.0f < X1; ++i)
+		{
+			for (int32 j = 0; Y0 + j * 50.0f < Y1; ++j)
+			{
+				const float Size = 42.0f + 34.0f * WorldGen::HashFloat(i * 5 + 1, j * 3 + 2, 1723);
+				const float CX = X0 + i * 50.0f + 25.0f + (WorldGen::HashFloat(i, j, 1724) - 0.5f) * 20.0f;
+				const float CY = Y0 + j * 50.0f + 25.0f + (WorldGen::HashFloat(i, j, 1725) - 0.5f) * 20.0f;
+				if (CX - Size * 0.7f < X0 || CX + Size * 0.7f > X1 || CY - Size * 0.7f < Y0 || CY + Size * 0.7f > Y1) continue;
+				if (Skipped(CX - Size * 0.7f, CY - Size * 0.7f, CX + Size * 0.7f, CY + Size * 0.7f)) continue;
+				const FLinearColor C = Shades[FMath::FloorToInt(WorldGen::HashFloat(i * 7 + 3, j * 11 + 5, 1726) * 4.0f) % 4];
+				const float Top = Z + 1.0f + 0.1f * (1 + (i + 2 * j) % 5);
+				for (const float Yaw : { 0.0f, 45.0f })
 				{
-					const float R = WorldGen::HashFloat(i * 31 + 7 + k * 101, j * 17 + 3, 1719);
-					const FLinearColor C = R < 0.38f ? Brown : R < 0.62f ? Mid : TanC;
-					const float W1 = 30.0f + 40.0f * WorldGen::HashFloat(i * 7 + 1, j * 5 + k, 1721);
-					const float CX0 = -HX + 12.0f + i * 60.0f + k * W1, CY0 = -HY + 12.0f + j * 55.0f;
-					const float CX1 = k == 0 ? CX0 + W1 : -HX + 12.0f + (i + 1) * 60.0f, CY1 = CY0 + 55.0f;
-					const float AX0 = FMath::Max(CX0, X0), AY0 = FMath::Max(CY0, Y0), AX1 = FMath::Min(CX1, X1), AY1 = FMath::Min(CY1, Y1);
-					if (AX1 - AX0 < 2.0f || AY1 - AY0 < 2.0f) continue;
-					if (Skip && AX1 > Skip->X0 && AX0 < Skip->X1 && AY1 > Skip->Y0 && AY0 < Skip->Y1) continue;
-					Tinted(ESurface::InteriorWall, C, AX0, AY0, Z, AX1, AY1, Z + 1.2f);
+					FPiece P;
+					P.Surface = ESurface::InteriorWall;
+					P.Center = FVector(CX, CY, (Z + 1.0f + Top) * 0.5f);
+					P.Size = FVector(Size, Size, Top - Z - 1.0f + 0.02f);
+					P.Rotation = FRotator(0.0f, Yaw, 0.0f);
+					P.bTinted = true;
+					P.Tint = C;
+					House.Pieces.Add(P);
 				}
 			}
 		}
@@ -684,6 +705,7 @@ FHouse GenerateFamilyHouse1719()
 	const float WinB = 90.0f, WinT = 220.0f;
 	const float Z1 = Storey;
 	const FHole UpStair{ -45.0f, -90.0f, 45.0f, 270.0f };
+	const FHole UpBath{ 50.0f, -290.0f, 230.0f, -120.0f };
 	const FHole DownStair{ -45.0f, -470.0f, 45.0f, -110.0f };
 	const float BZ = -Storey;
 
@@ -786,7 +808,7 @@ FHouse GenerateFamilyHouse1719()
 	Put(EFurniture::Sofa, -150.0f, 440.0f, 180.0f);
 	Put(EFurniture::ArmChair, -250.0f, 340.0f, 150.0f);
 	Put(EFurniture::ArmChair, -60.0f, 340.0f, 200.0f);
-	Carpet(-HX + 12.0f, 280.0f, HX - 12.0f, HY - 12.0f, 0.0f, nullptr);
+	Carpet(-HX + 12.0f, 280.0f, HX - 12.0f, HY - 12.0f, 0.0f, {});
 	Tinted(ESurface::Wood, Black, -HX + 14.0f, 470.0f, 0.0f, -HX + 54.0f, 520.0f, 45.0f);
 	Tinted(ESurface::Wood, Black, -HX + 20.0f, 472.0f, 45.0f, -HX + 32.0f, 518.0f, 100.0f);
 	Tinted(ESurface::Stone, FLinearColor(0.55f, 0.55f, 0.55f), -HX - 30.0f, 335.0f, WinB + 30.0f, -HX + 40.0f, 465.0f, WinB + 105.0f); // window AC, 220 V
@@ -833,13 +855,20 @@ FHouse GenerateFamilyHouse1719()
 
 	// ================= Upper floor: a half-storey under the roof =================
 	FloorSlab(ESurface::PlankFloor, Z1 - SlabThickness, Z1, { UpStair });
-	Carpet(-HX + 12.0f, -HY + 12.0f, HX - 12.0f, HY - 12.0f, Z1, &UpStair);
+	Carpet(-HX + 12.0f, -HY + 12.0f, HX - 12.0f, HY - 12.0f, Z1, { UpStair, UpBath });
 	Exterior(true, HY, Z1, Knee, {});
 	Exterior(true, -HY, Z1, Knee, {});
 	Exterior(false, -HX, Z1, Wall, { { 100.0f, 110.0f, WinB, WinT, true } });
 	Exterior(false, HX, Z1, Wall, { { 100.0f, 110.0f, WinB, WinT, true } });
 	Interior(false, -50.0f, -290.0f, 300.0f, Z1, 300.0f, { });                          // boys' room is open to the landing on this side
-	Interior(false, 50.0f, -290.0f, 300.0f, Z1, 300.0f, { 100.0f });                    // girl's dormer room door
+	Interior(false, 50.0f, -290.0f, 300.0f, Z1, 300.0f, { 100.0f, -200.0f });
+	Interior(false, 230.0f, -290.0f, -120.0f, Z1, 250.0f, {});                          // the closet bathroom at the head of the stairs
+	Interior(true, -120.0f, 50.0f, 230.0f, Z1, 250.0f, {});
+	Interior(true, -290.0f, 50.0f, 230.0f, Z1, 250.0f, {});
+	Box(ESurface::TileFloor, 55.0f, -285.0f, Z1, 225.0f, -125.0f, Z1 + 1.5f);
+	Box(ESurface::InteriorWall, 60.0f, -285.0f, Z1, 220.0f, -215.0f, Z1 + 55.0f);   // tub
+	Box(ESurface::InteriorWall, 175.0f, -165.0f, Z1, 210.0f, -130.0f, Z1 + 40.0f);   // toilet
+	Box(ESurface::InteriorWall, 60.0f, -165.0f, Z1, 110.0f, -135.0f, Z1 + 85.0f);    // sink                    // girl's dormer room door
 	// The back door upstairs: a door in the rear wall that opens on nothing, just a drop to the yard.
 	{
 		FWall Back; Back.bAlongX = true; Back.Fixed = -HY; Back.From = -70.0f; Back.To = 70.0f; Back.Thickness = OuterWall; Back.bExterior = true;
@@ -929,8 +958,8 @@ FHouse GenerateFamilyHouse1719()
 		Box(ESurface::Stone, -170.0f - 108.0f, PY + 15.0f, -60.0f, -170.0f - 100.0f, PY + 130.0f, 45.0f);
 	}
 
-	// Interior walls were each a solid colour or wood panelling, never patterned. Room by room (a best guess until
-	// confirmed): solid earth-tone paint in most rooms, panelling in the halls, baby's room and the basement bar side.
+	// Interior walls were each a solid colour or wood panelling, never patterned: light blue everywhere upstairs; downstairs
+	// (a best guess until confirmed) earth-tone paint, with panelling in the hall, the baby's room and the basement bar side.
 	for (FPiece& P : House.Pieces)
 	{
 		if (P.bFurniture || P.bTinted || P.Surface != ESurface::InteriorWall || FMath::Abs(P.Center.X) > HX || P.Center.Y < -HY || P.Center.Y > HY) continue;
@@ -950,9 +979,7 @@ FHouse GenerateFamilyHouse1719()
 		}
 		else                           // upstairs
 		{
-			if (X < -50.0f)            { C = FLinearColor(0.85f, 0.62f, 0.4f); }                                            // boys: brown
-			else if (X > 50.0f)        { C = FLinearColor(1.3f, 1.05f, 0.8f); }                                             // girl's dormer: tan
-			else                       { bPanel = true; C = FLinearColor(0.8f, 0.55f, 0.36f); }                            // landing
+			C = FLinearColor(0.72f, 0.9f, 1.35f);                                                                            // every upstairs wall: solid light blue
 		}
 		if (bPanel) P.Surface = ESurface::Wood;
 		P.bTinted = true;
