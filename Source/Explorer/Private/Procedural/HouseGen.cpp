@@ -759,11 +759,20 @@ FHouse GenerateFamilyHouse1719()
 	Put(EFurniture::Sofa, -150.0f, 440.0f, 180.0f);
 	Put(EFurniture::ArmChair, -250.0f, 340.0f, 150.0f);
 	Put(EFurniture::ArmChair, -60.0f, 340.0f, 200.0f);
-	// Brown-and-tan patterned carpet across the front room, laid in stripes.
-	for (int32 i = 0; i < 18; ++i)
+	// Brown-and-tan carpet with a random, mottled pattern across the front room: 24 cm patches of varying shade.
 	{
-		const FLinearColor Brown(0.26f, 0.15f, 0.08f), TanC(0.85f, 0.68f, 0.45f);
-		Tinted(ESurface::InteriorWall, (i & 1) ? Brown : TanC, -HX + 12.0f + i * 49.5f, 280.0f, 0.0f, FMath::Min(-HX + 12.0f + (i + 1) * 49.5f, HX - 12.0f), HY - 12.0f, 1.2f);
+		const FLinearColor Brown(0.24f, 0.14f, 0.07f), TanC(0.88f, 0.70f, 0.47f);
+		for (int32 i = 0; i < 37; ++i)
+		{
+			for (int32 j = 0; j < 11; ++j)
+			{
+				const float R = WorldGen::HashFloat(i * 31 + 7, j * 17 + 3, 1719);
+				const float R2 = WorldGen::HashFloat(i * 13 + 5, j * 29 + 11, 1720);
+				const FLinearColor C = FMath::Lerp(Brown, TanC, FMath::Clamp(R * 0.8f + R2 * 0.4f - 0.1f, 0.0f, 1.0f));
+				const float X0 = -HX + 12.0f + i * 24.0f, Y0 = 280.0f + j * 24.0f;
+				Tinted(ESurface::InteriorWall, C, X0, Y0, 0.0f, FMath::Min(X0 + 24.0f, HX - 12.0f), FMath::Min(Y0 + 24.0f, HY - 12.0f), 1.2f);
+			}
+		}
 	}
 	Tinted(ESurface::Wood, Black, -HX + 14.0f, 470.0f, 0.0f, -HX + 54.0f, 520.0f, 45.0f);
 	Tinted(ESurface::Wood, Black, -HX + 20.0f, 472.0f, 45.0f, -HX + 32.0f, 518.0f, 100.0f);
