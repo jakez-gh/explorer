@@ -11,9 +11,9 @@ namespace
 	constexpr float InnerWall = 12.0f;
 	constexpr float DoorWidth = 100.0f;
 	constexpr float DoorHeight = 215.0f;
-	constexpr float WindowWidth = 110.0f;
-	constexpr float WindowHeight = 130.0f;
-	constexpr float WindowSill = 90.0f;
+	constexpr float WindowWidth = 120.0f;
+	constexpr float WindowHeight = 150.0f;
+	constexpr float WindowSill = 80.0f;
 	constexpr float MinRoom = 260.0f;
 	constexpr float StairWidth = 110.0f;
 	constexpr float StairLength = 380.0f;
@@ -130,6 +130,15 @@ namespace
 					Slab(ESurface::Wood, B, B + Frame, W.Fixed, W.Thickness + 4.0f, Z0 + O.Bottom, Z0 + O.Top, W.bAlongX);
 					Slab(ESurface::Wood, O.At - 3.0f, O.At + 3.0f, W.Fixed, 6.0f, Z0 + O.Bottom, Z0 + O.Top, W.bAlongX);
 					Slab(ESurface::Glass, A, B, W.Fixed, 2.0f, Z0 + O.Bottom, Z0 + O.Top, W.bAlongX);
+					if (W.bExterior)
+					{
+						// Projecting stone sill and shutters flanking the window on the outside face.
+						const float OutSign = W.Fixed >= 0.0f ? 1.0f : -1.0f;
+						const float Face = W.Fixed + OutSign * (W.Thickness * 0.5f + 5.0f);
+						Slab(ESurface::Stone, A - Frame - 6.0f, B + Frame + 6.0f, Face, 12.0f, Z0 + O.Bottom - Frame - 6.0f, Z0 + O.Bottom - Frame, W.bAlongX);
+						Slab(ESurface::Wood, A - Frame - 42.0f, A - Frame - 2.0f, Face - OutSign * 2.0f, 5.0f, Z0 + O.Bottom - Frame, Z0 + O.Top + Frame, W.bAlongX);
+						Slab(ESurface::Wood, B + Frame + 2.0f, B + Frame + 42.0f, Face - OutSign * 2.0f, 5.0f, Z0 + O.Bottom - Frame, Z0 + O.Top + Frame, W.bAlongX);
+					}
 				}
 				else
 				{
@@ -301,7 +310,16 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys)
 	// Plinth and entrance step.
 	B.Box(ESurface::Stone, FVector(-HX - 20.0f, -HY - 20.0f, -60.0f), FVector(HX + 20.0f, HY + 20.0f, 0.0f));
 	const float DoorX = Rand.Range(-HX * 0.4f, HX * 0.4f);
-	B.Box(ESurface::Stone, FVector(DoorX - 90.0f, HY + 20.0f, -60.0f), FVector(DoorX + 90.0f, HY + 90.0f, -25.0f));
+	// Porch: a stone deck, two posts and a flat roof over the front door, a step below.
+	B.Box(ESurface::Stone, FVector(DoorX - 160.0f, HY + 20.0f, -60.0f), FVector(DoorX + 160.0f, HY + 190.0f, -8.0f));
+	B.Box(ESurface::Stone, FVector(DoorX - 120.0f, HY + 190.0f, -60.0f), FVector(DoorX + 120.0f, HY + 240.0f, -34.0f));
+	for (const float Sx : { -1.0f, 1.0f })
+	{
+		B.Box(ESurface::Wood, FVector(DoorX + Sx * 145.0f - 7.0f, HY + 170.0f, -8.0f), FVector(DoorX + Sx * 145.0f + 7.0f, HY + 184.0f, 260.0f));
+	}
+	B.Box(ESurface::Wood, FVector(DoorX - 165.0f, HY + 20.0f, 260.0f), FVector(DoorX + 165.0f, HY + 195.0f, 276.0f));
+	// The front door stands open, swung into the hall.
+	B.Box(ESurface::Wood, FVector(DoorX - DoorWidth * 0.5f - 2.0f, HY - OuterWall - DoorWidth, 0.0f), FVector(DoorX - DoorWidth * 0.5f + 2.0f, HY - OuterWall, DoorHeight));
 
 	for (int32 Floor = 0; Floor < Floors; ++Floor)
 	{
@@ -510,8 +528,20 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys)
 		P.Rotation = FRotator(0.0f, 0.0f, Sy * Pitch);
 		House.Pieces.Add(P);
 	}
+	// Corner boards up the walls, and a small window in each gable.
+	for (const float Sx : { -1.0f, 1.0f })
+	{
+		for (const float Sy : { -1.0f, 1.0f })
+		{
+			B.Box(ESurface::Wood, FVector(Sx * HX - 9.0f + Sx * 6.0f, Sy * HY - 9.0f + Sy * 6.0f, 0.0f), FVector(Sx * HX + 9.0f + Sx * 6.0f, Sy * HY + 9.0f + Sy * 6.0f, Top));
+		}
+		const float Zc = Top + SlabThickness + RiseH * 0.28f;
+		B.Box(ESurface::Wood, FVector(Sx * HX + Sx * 4.0f - 7.0f, -50.0f, Zc - 45.0f), FVector(Sx * HX + Sx * 4.0f + 7.0f, 50.0f, Zc + 45.0f));
+		B.Box(ESurface::Glass, FVector(Sx * HX + Sx * 12.0f - 1.5f, -42.0f, Zc - 37.0f), FVector(Sx * HX + Sx * 12.0f + 1.5f, 42.0f, Zc + 37.0f));
+	}
 	// Chimney.
 	B.Box(ESurface::Stone, FVector(HX * 0.45f, -40.0f, Top), FVector(HX * 0.45f + 70.0f, 30.0f, Top + RiseH + 120.0f));
+	B.Box(ESurface::Stone, FVector(HX * 0.45f - 8.0f, -48.0f, Top + RiseH + 120.0f), FVector(HX * 0.45f + 78.0f, 38.0f, Top + RiseH + 145.0f));
 	House.Height = Top + SlabThickness + RiseH;
 	return House;
 }
