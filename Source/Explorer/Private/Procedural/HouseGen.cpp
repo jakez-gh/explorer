@@ -759,18 +759,23 @@ FHouse GenerateFamilyHouse1719()
 	Put(EFurniture::Sofa, -150.0f, 440.0f, 180.0f);
 	Put(EFurniture::ArmChair, -250.0f, 340.0f, 150.0f);
 	Put(EFurniture::ArmChair, -60.0f, 340.0f, 200.0f);
-	// Brown-and-tan carpet with a random, mottled pattern across the front room: 24 cm patches of varying shade.
+	// Brown-and-tan carpet: distinct patches of colour (no swirls or gradients), each 40-100 cm across.
 	{
-		const FLinearColor Brown(0.24f, 0.14f, 0.07f), TanC(0.88f, 0.70f, 0.47f);
-		for (int32 i = 0; i < 37; ++i)
+		const FLinearColor Brown(0.22f, 0.13f, 0.07f), Mid(0.45f, 0.30f, 0.17f), TanC(0.88f, 0.70f, 0.47f);
+		for (int32 i = 0; i < 15; ++i)
 		{
-			for (int32 j = 0; j < 11; ++j)
+			for (int32 j = 0; j < 5; ++j)
 			{
-				const float R = WorldGen::HashFloat(i * 31 + 7, j * 17 + 3, 1719);
-				const float R2 = WorldGen::HashFloat(i * 13 + 5, j * 29 + 11, 1720);
-				const FLinearColor C = FMath::Lerp(Brown, TanC, FMath::Clamp(R * 0.8f + R2 * 0.4f - 0.1f, 0.0f, 1.0f));
-				const float X0 = -HX + 12.0f + i * 24.0f, Y0 = 280.0f + j * 24.0f;
-				Tinted(ESurface::InteriorWall, C, X0, Y0, 0.0f, FMath::Min(X0 + 24.0f, HX - 12.0f), FMath::Min(Y0 + 24.0f, HY - 12.0f), 1.2f);
+				// Each patch is a rectangle of a random size, split into two so edges are irregular.
+				for (int32 k = 0; k < 2; ++k)
+				{
+					const float R = WorldGen::HashFloat(i * 31 + 7 + k * 101, j * 17 + 3, 1719);
+					const FLinearColor C = R < 0.38f ? Brown : R < 0.62f ? Mid : TanC;
+					const float W1 = 30.0f + 40.0f * WorldGen::HashFloat(i * 7 + 1, j * 5 + k, 1721);
+					const float X0 = -HX + 12.0f + i * 60.0f + k * W1, Y0 = 280.0f + j * 55.0f;
+					const float X1 = k == 0 ? X0 + W1 : -HX + 12.0f + (i + 1) * 60.0f;
+					Tinted(ESurface::InteriorWall, C, X0, Y0, 0.0f, FMath::Min(X1, HX - 12.0f), FMath::Min(Y0 + 55.0f, HY - 12.0f), 1.2f);
+				}
 			}
 		}
 	}
