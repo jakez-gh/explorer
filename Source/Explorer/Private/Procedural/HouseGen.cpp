@@ -1062,14 +1062,14 @@ FHouse GenerateFamilyHouse1719()
 		Roof.Size = FVector(PX1 - PX0 + 70.0f, 290.0f, 10.0f);
 		Roof.Rotation = FRotator(0.0f, 0.0f, 10.0f);
 		House.Pieces.Add(Roof);
-		const FLinearColor Pine(1.7f, 1.35f, 0.8f);
-		for (int32 k = 0; k < 6; ++k)
+		// Concrete front steps (as the family remembers them), with low concrete cheek walls.
+		for (int32 k = 0; k < 4; ++k)
 		{
-			Tinted(ESurface::Wood, Pine, -65.0f, PY + 15.0f + k * 26.0f, -110.0f, 65.0f, PY + 41.0f + k * 26.0f, -110.0f + (6 - k) * 18.0f);
+			Box(ESurface::Stone, -65.0f, PY + 15.0f + k * 35.0f, -110.0f, 65.0f, PY + 50.0f + k * 35.0f, -110.0f + (4 - k) * 25.0f);
 		}
 		for (const float Sx : { -1.0f, 1.0f })
 		{
-			Tinted(ESurface::Wood, Pine, Sx * 62.0f - 3.0f, PY + 15.0f, -20.0f, Sx * 62.0f + 3.0f, PY + 175.0f, 70.0f);
+			Box(ESurface::Stone, Sx * 62.0f - 6.0f, PY + 15.0f, -110.0f, Sx * 62.0f + 6.0f, PY + 155.0f, -10.0f);
 		}
 	}
 	// A wooden deck and steps at the back door.

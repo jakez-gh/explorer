@@ -41,3 +41,5 @@ Note: photos show it as renovated now (new floors, kitchen, paint); the shape is
 - **Upper floor (attic rooms):** carpeted, sloped ceilings, knee-wall closets, half-wall railing around the stair opening; a hall leads to a room with a window at the back and another at the side; a dormer-niche with a small window; a five-panel door to eave storage.
 - **Basement:** cinderblock walls, unfinished, orange-and-black checker tile floor near the stairs, small high window.
 - **Back:** double window and back door, wooden deck with stairs to the side, big tree in the yard, sheds with teal roofs, asphalt pad at the alley, chain-link fence.
+
+Corrections from the family: the front step was concrete (the photos show newer wood; not what they remember), and the interior stairs did not move, so the central-stairs layout stands over the photos' kitchen-side stair.
