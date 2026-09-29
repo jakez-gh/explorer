@@ -463,7 +463,9 @@ def param_triplanar(name, normal=False):
 
 
 lib.connect_material_property(g.mul(param_triplanar("Diffuse"), tint), "", MP.MP_BASE_COLOR)
-lib.connect_material_property(param_triplanar("Normal", True), "", MP.MP_NORMAL)
+# NormalStrength < 1 flattens the relief, so painted walls read as smooth solid colour instead of spiky plaster.
+strength = g.node(unreal.MaterialExpressionScalarParameter, parameter_name="NormalStrength", default_value=1.0)
+lib.connect_material_property(g.lerp(g.color(0.0, 0.0, 1.0), param_triplanar("Normal", True), strength), "", MP.MP_NORMAL)
 arm = param_triplanar("ARM")
 lib.connect_material_property(arm, "G", MP.MP_ROUGHNESS)
 lib.connect_material_property(arm, "R", MP.MP_AMBIENT_OCCLUSION)
@@ -487,6 +489,8 @@ for name, (asset, scale_cm) in SURFACES.items():
         if t:
             lib.set_material_instance_texture_parameter_value(mi, p_name, t)
     lib.set_material_instance_scalar_parameter_value(mi, "ScaleCm", scale_cm)
+    if name == "InteriorWall":
+        lib.set_material_instance_scalar_parameter_value(mi, "NormalStrength", 0.1)
     unreal.EditorAssetLibrary.save_loaded_asset(mi)
     unreal.log(f"Created {path}")
 
