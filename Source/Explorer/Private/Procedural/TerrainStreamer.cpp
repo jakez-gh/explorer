@@ -2471,7 +2471,7 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 		const FLinearColor Wash = Washes[Lot->Seed % UE_ARRAY_COUNT(Washes)];
 		if (Level == EProps::Full)
 		{
-			const HouseGen::FHouse Plan = Lot->bBungalow1733 ? HouseGen::GenerateBungalow1733() : HouseGen::Generate(Lot->Seed, Style, Floors > 1, W, D, false, Floors);
+			const HouseGen::FHouse Plan = Lot->bFamilyHouse ? HouseGen::GenerateFamilyHouse1719() : HouseGen::Generate(Lot->Seed, Style, Floors > 1, W, D, false, Floors);
 			for (const HouseGen::FPiece& Piece : Plan.Pieces)
 			{
 				const FVector World = Base + Quat.RotateVector(Piece.Center);
@@ -2489,7 +2489,23 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 					Size.Z += Extra;
 					Mid.Z -= Extra * 0.5f;
 				}
-				Batch.Add(static_cast<EPropPart>(BuildSurf0 + static_cast<int32>(Piece.Surface)), Mid, PieceRot, Size, Piece.Surface == HouseGen::ESurface::ExteriorWall ? Wash : White);
+				FLinearColor Tint = Piece.Surface == HouseGen::ESurface::ExteriorWall ? Wash : White;
+				if (Lot->bFamilyHouse && !Piece.bTinted)
+				{
+					// Blue vinyl siding outside, earth-tone paint inside.
+					if (Piece.Surface == HouseGen::ESurface::ExteriorWall) Tint = FLinearColor(0.42f, 0.62f, 1.25f);
+					else if (Piece.Surface == HouseGen::ESurface::InteriorWall) Tint = FLinearColor(1.25f, 1.02f, 0.78f);
+				}
+				if (Piece.bTinted) Tint = Piece.Tint;
+				Batch.Add(static_cast<EPropPart>(BuildSurf0 + static_cast<int32>(Piece.Surface)), Mid, PieceRot, Size, Tint);
+			}
+			// The single tree in the back yard.
+			if (Lot->bFamilyHouse && NumLoadedScanned > 0 && MatureSlots.Num() > 0)
+			{
+				const FVector Tree = Base + Quat.RotateVector(FVector(-330.0f, -1450.0f, 0.0f));
+				const float TreeGround = WorldGen::Height(Tree.X, Tree.Y);
+				Batch.Add(static_cast<EPropPart>(Scanned0 + MatureSlots[0]), FVector(Tree.X, Tree.Y, TreeGround - 25.0f), FRotator(0.0f, 40.0f, 0.0f), FVector(0.9f), White);
+				Batch.Add(Trunk, FVector(Tree.X, Tree.Y, TreeGround + ScannedTreeHeight[MatureSlots[0]] * 0.45f), FRotator::ZeroRotator, FVector(120.0f, 120.0f, ScannedTreeHeight[MatureSlots[0]] * 0.9f), White);
 			}
 		}
 		else

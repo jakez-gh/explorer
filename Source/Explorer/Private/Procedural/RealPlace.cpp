@@ -484,9 +484,9 @@ namespace RealPlace
 			}
 			if (Nearest != INDEX_NONE)
 			{
-				Place.Lots[Nearest].bBungalow1733 = true;
-				Place.Lots[Nearest].Width = 850.0f;
-				Place.Lots[Nearest].Depth = 975.0f;
+				Place.Lots[Nearest].bFamilyHouse = true;
+				Place.Lots[Nearest].Width = 900.0f;
+				Place.Lots[Nearest].Depth = 1100.0f;
 			}
 		}
 		for (const TSharedPtr<FJsonValue>& V : Root->GetArrayField(TEXT("places")))

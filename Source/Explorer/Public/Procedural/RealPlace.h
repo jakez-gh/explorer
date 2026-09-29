@@ -39,7 +39,7 @@ namespace RealPlace
 	bool NearestRoad(const FVector2D& P, double MaxDist, FVector2D& OutPoint, float& OutWidth);
 
 	// House lots along residential streets where the map has no building: fills in the neighbourhoods.
-	struct FLot { FVector2D Pos; float Yaw; float Width; float Depth; uint32 Seed; bool bBungalow1733 = false; };
+	struct FLot { FVector2D Pos; float Yaw; float Width; float Depth; uint32 Seed; bool bFamilyHouse = false; };
 	void LotsIn(const FVector2D& Min, const FVector2D& Max, TArray<const FLot*>& Out);
 
 	// Named landmarks (schools, parks...) in world units, for reports and starting positions.
