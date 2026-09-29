@@ -340,22 +340,51 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys)
 			Wall.To = Wall.bAlongX ? HX : HY;
 			Wall.Thickness = OuterWall;
 			Wall.bExterior = true;
-			const float Span = Wall.To - Wall.From;
 			const bool bFront = Side == 3 && Floor == 0;
-			const int32 Count = FMath::Max(1, FMath::FloorToInt(Span / 280.0f));
-			for (int32 k = 0; k < Count; ++k)
+
+			// Where interior walls meet this outer wall, so no window sits on one: windows are centred
+			// in each room's stretch of the wall instead of spread evenly along it.
+			TArray<float> Breaks;
+			Breaks.Add(Wall.From);
+			for (const FWall& Inner : Walls)
 			{
-				const float At = Wall.From + (k + 0.5f) * Span / Count;
-				if (bFront && FMath::Abs(At - DoorX) < DoorWidth + WindowWidth * 0.5f)
+				const bool bTouches =
+					(Side == 0 && Inner.bAlongX && FMath::IsNearlyEqual(Inner.From, Inside.X0, 1.0f)) ||
+					(Side == 1 && Inner.bAlongX && FMath::IsNearlyEqual(Inner.To, Inside.X1, 1.0f)) ||
+					(Side == 2 && !Inner.bAlongX && FMath::IsNearlyEqual(Inner.From, Inside.Y0, 1.0f)) ||
+					(Side == 3 && !Inner.bAlongX && FMath::IsNearlyEqual(Inner.To, Inside.Y1, 1.0f));
+				if (bTouches)
+				{
+					Breaks.Add(Inner.Fixed);
+				}
+			}
+			Breaks.Add(Wall.To);
+			Breaks.Sort();
+			const float Clearance = InnerWall * 0.5f + 30.0f;
+			for (int32 b = 0; b + 1 < Breaks.Num(); ++b)
+			{
+				const float A = Breaks[b] + (b > 0 ? Clearance : OuterWall);
+				const float Z1 = Breaks[b + 1] - (b + 2 < Breaks.Num() ? Clearance : OuterWall);
+				const float Len = Z1 - A;
+				if (Len < WindowWidth + 40.0f)
 				{
 					continue;
 				}
-				// No window where the stair runs along the back wall.
-				if (Side == 2 && At < Stair.X1 + WindowWidth * 0.5f)
+				const int32 Count = FMath::Max(1, FMath::FloorToInt(Len / 300.0f));
+				for (int32 k = 0; k < Count; ++k)
 				{
-					continue;
+					const float At = A + (k + 0.5f) * Len / Count;
+					if (bFront && FMath::Abs(At - DoorX) < DoorWidth + WindowWidth * 0.5f)
+					{
+						continue;
+					}
+					// No window where the stair runs along the back wall.
+					if (Side == 2 && At < Stair.X1 + WindowWidth * 0.5f)
+					{
+						continue;
+					}
+					Wall.Openings.Add({ At, WindowWidth, WindowSill, WindowSill + WindowHeight, true });
 				}
-				Wall.Openings.Add({ At, WindowWidth, WindowSill, WindowSill + WindowHeight, true });
 			}
 			if (bFront)
 			{
