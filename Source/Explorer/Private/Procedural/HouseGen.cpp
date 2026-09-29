@@ -756,18 +756,20 @@ FHouse GenerateFamilyHouse1719()
 		Box(ESurface::Wood, -45.0f, -90.0f + s * Run, s * Rise, 45.0f, -90.0f + (s + 1) * Run + 3.0f, (s + 1) * Rise);
 	}
 	// Living room (west, front) with the window air conditioner; dining room (east, front).
-	Put(EFurniture::Sofa, -180.0f, 460.0f, 180.0f);
-	Put(EFurniture::CoffeeTable, -290.0f, 440.0f, 0.0f);
-	Put(EFurniture::ArmChair, -330.0f, 330.0f, 90.0f);
-	Put(EFurniture::Bookshelf, -330.0f, 310.0f, 90.0f);
+	Put(EFurniture::Sofa, -150.0f, 440.0f, 180.0f);
+	Put(EFurniture::ArmChair, -250.0f, 340.0f, 150.0f);
+	Put(EFurniture::ArmChair, -60.0f, 340.0f, 200.0f);
+	// Brown-and-tan patterned carpet across the front room, laid in stripes.
+	for (int32 i = 0; i < 18; ++i)
+	{
+		const FLinearColor Brown(0.26f, 0.15f, 0.08f), TanC(0.85f, 0.68f, 0.45f);
+		Tinted(ESurface::InteriorWall, (i & 1) ? Brown : TanC, -HX + 12.0f + i * 49.5f, 280.0f, 0.0f, FMath::Min(-HX + 12.0f + (i + 1) * 49.5f, HX - 12.0f), HY - 12.0f, 1.2f);
+	}
 	Tinted(ESurface::Wood, Black, -HX + 14.0f, 470.0f, 0.0f, -HX + 54.0f, 520.0f, 45.0f);
 	Tinted(ESurface::Wood, Black, -HX + 20.0f, 472.0f, 45.0f, -HX + 32.0f, 518.0f, 100.0f);
 	Tinted(ESurface::Stone, FLinearColor(0.55f, 0.55f, 0.55f), -HX - 30.0f, 335.0f, WinB + 30.0f, -HX + 40.0f, 465.0f, WinB + 105.0f); // window AC, 220 V
 	Box(ESurface::Wood, -HX + 12.0f, 470.0f, 25.0f, -HX + 22.0f, 480.0f, 55.0f);
-	// No dining room: the east half of the front room is more living room, and the family ate at a four-top in the kitchen.
-	Put(EFurniture::Sofa, 250.0f, 480.0f, 180.0f);
-	Put(EFurniture::CoffeeTable, 250.0f, 400.0f, 0.0f);
-	Put(EFurniture::ArmChair, 380.0f, 400.0f, 180.0f);
+	// No dining room: the family ate at a four-top in the kitchen, and the front room is one living room.
 	Put(EFurniture::Cupboard, 400.0f, 300.0f, 180.0f);
 	Put(EFurniture::CeilingLamp, -180.0f, 400.0f, 0.0f, Wall - 45.0f);
 	Put(EFurniture::CeilingLamp, 250.0f, 400.0f, 0.0f, Wall - 45.0f);
@@ -815,6 +817,17 @@ FHouse GenerateFamilyHouse1719()
 	Exterior(false, HX, Z1, Wall, { { 100.0f, 110.0f, WinB, WinT, true } });
 	Interior(false, -50.0f, -290.0f, 300.0f, Z1, 300.0f, { });                          // boys' room is open to the landing on this side
 	Interior(false, 50.0f, -290.0f, 300.0f, Z1, 300.0f, { 100.0f });                    // girl's dormer room door
+	// The back door upstairs: a door in the rear wall that opens on nothing, just a drop to the yard.
+	{
+		FWall Back; Back.bAlongX = true; Back.Fixed = -HY; Back.From = -70.0f; Back.To = 70.0f; Back.Thickness = OuterWall; Back.bExterior = true;
+		Back.Openings.Add({ 0.0f, 100.0f, 0.0f, DoorHeight, false });
+		B.Wall(Back, Z1, Z1 + 260.0f);
+		Box(ESurface::ExteriorWall, -70.0f, -HY - 11.0f, Z1, -58.0f, -HY + 120.0f, Z1 + 275.0f);
+		Box(ESurface::ExteriorWall, 58.0f, -HY - 11.0f, Z1, 70.0f, -HY + 120.0f, Z1 + 275.0f);
+		FPiece Cap; Cap.Surface = ESurface::SlateRoof; Cap.Center = FVector(0.0f, -HY + 55.0f, Z1 + 282.0f); Cap.Size = FVector(170.0f, 200.0f, 8.0f);
+		House.Pieces.Add(Cap);
+		Box(ESurface::Wood, -60.0f, -HY - 9.0f, Z1 - 4.0f, 60.0f, -HY + 12.0f, Z1);                       // sill, then the drop
+	}
 	// Railing around the stair opening.
 	Box(ESurface::Wood, -46.0f, -94.0f, Z1, -40.0f, 270.0f, Z1 + 95.0f);
 	Box(ESurface::Wood, 40.0f, -94.0f, Z1, 46.0f, 270.0f, Z1 + 95.0f);
