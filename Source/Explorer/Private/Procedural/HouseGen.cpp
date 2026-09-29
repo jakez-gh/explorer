@@ -1,5 +1,7 @@
 #include "Procedural/HouseGen.h"
 #include "Procedural/WorldGen.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
 
 namespace HouseGen
 {
@@ -504,6 +506,12 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys)
 	// Ceiling / roof base, then a pitched roof with gables: each gable is built from stacked courses
 	// that step in, and each roof plane is a thin tilted slab overhanging the walls.
 	const float Top = Floors * StoreyHeight - SlabThickness;
+	// -NoRoof leaves the roofs off so a debug camera can look down into the rooms.
+	if (FParse::Param(FCommandLine::Get(), TEXT("NoRoof")))
+	{
+		House.Height = Top;
+		return House;
+	}
 	B.Box(ESurface::InteriorWall, FVector(-HX, -HY, Top), FVector(HX, HY, Top + SlabThickness));
 	const float Pitch = 38.0f;
 	const float RiseH = HY * FMath::Tan(FMath::DegreesToRadians(Pitch));
