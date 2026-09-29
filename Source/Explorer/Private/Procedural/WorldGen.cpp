@@ -72,12 +72,12 @@ namespace WorldGen
 
 	FVector2D RoadNode(int32 CX, int32 CY)
 	{
-		return FVector2D((CX + FMath::Lerp(0.2f, 0.8f, HashFloat(CX, CY, 21))) * RoadCellSize(), (CY + FMath::Lerp(0.2f, 0.8f, HashFloat(CX, CY, 22))) * RoadCellSize());
+		return FVector2D((CX + FMath::Lerp(0.36f, 0.64f, HashFloat(CX, CY, 21))) * RoadCellSize(), (CY + FMath::Lerp(0.36f, 0.64f, HashFloat(CX, CY, 22))) * RoadCellSize());
 	}
 
 	static FVector2D TrailNode(int32 CX, int32 CY)
 	{
-		return FVector2D((CX + FMath::Lerp(0.15f, 0.85f, HashFloat(CX, CY, 931))) * TrailCellSize, (CY + FMath::Lerp(0.15f, 0.85f, HashFloat(CX, CY, 932))) * TrailCellSize);
+		return FVector2D((CX + FMath::Lerp(0.3f, 0.7f, HashFloat(CX, CY, 931))) * TrailCellSize, (CY + FMath::Lerp(0.3f, 0.7f, HashFloat(CX, CY, 932))) * TrailCellSize);
 	}
 
 	void PathsNear(const FVector2D& Min, const FVector2D& Max, double Margin, TArray<FPath>& Out)
@@ -112,7 +112,7 @@ namespace WorldGen
 				}
 			}
 		};
-		Gather(RoadCellSize(), true, 0.75f, 420.0f, 940, &RoadNode);
+		Gather(RoadCellSize(), true, 0.9f, 420.0f, 940, &RoadNode);
 		Gather(TrailCellSize, false, 0.45f, 150.0f, 950, &TrailNode);
 	}
 
@@ -123,7 +123,9 @@ namespace WorldGen
 		const FVector2D Side(-Along.Y / Length, Along.X / Length);
 		// Two scales of wander, pinned to zero at both ends so paths meet their nodes.
 		const float Phase = (Path.Seed & 1023) * 0.37f;
-		const float Wander = FMath::PerlinNoise1D(T * Length / 60000.0f + Phase) * 0.12f + FMath::PerlinNoise1D(T * Length / 9000.0f + Phase * 2.0f) * 0.015f;
+		// Long, lazy curves: a bend takes kilometres, never turns more than ~20 degrees, and vanishes at
+		// both ends so roads leave their junctions straight.
+		const float Wander = FMath::PerlinNoise1D(T * Length / 180000.0f + Phase) * 0.03f + FMath::PerlinNoise1D(T * Length / 55000.0f + Phase * 2.0f) * 0.003f;
 		return Path.A + Along * T + Side * Wander * Length * FMath::Sin(T * PI);
 	}
 

@@ -33,6 +33,11 @@ namespace
 		SeedIsland = 60,
 		SeedLighthouse = 80,
 		SeedStones = 100,
+		SeedRuin = 120,
+		SeedObelisk = 140,
+		SeedWorldTree = 160,
+		SeedSkyGate = 180,
+		SeedWindFarm = 200,
 	};
 
 	constexpr double VillageCell = 250000.0;
@@ -43,6 +48,16 @@ namespace
 	constexpr double LighthouseCell = 500000.0;
 	constexpr double StoneCircleCell = 400000.0;
 	constexpr double StoneCircleRadius = 2500.0;
+	constexpr double RuinCell = 600000.0;
+	constexpr double RuinRadius = 6000.0;
+	constexpr double ObeliskCell = 700000.0;
+	constexpr double ObeliskRadius = 4500.0;
+	constexpr double WorldTreeCell = 1500000.0;
+	constexpr double WorldTreeRadius = 9000.0;
+	constexpr double SkyGateCell = 700000.0;
+	constexpr double SkyGateRadius = 14000.0;
+	constexpr double WindFarmCell = 1200000.0;
+	constexpr double WindFarmRadius = 16000.0;
 
 	// Vegetation and rocks fade out beyond this distance; terrain colour carries forests further out.
 	constexpr float DetailCullDistance = 150000.0f;
@@ -565,9 +580,9 @@ UStaticMesh* ATerrainStreamer::CreateTreeMesh(ETreeVariant Variant, FTreeTemplat
 	for (int32 r = 0; r < Roots; ++r)
 	{
 		const float A = (r + Range(-0.2f, 0.2f)) * 2.0f * PI / Roots;
-		const FVector3f Out(FMath::Cos(A), FMath::Sin(A), 0.0f);
+		const FVector3f Dir(FMath::Cos(A), FMath::Sin(A), 0.0f);
 		const float Reach = Radius * Flare * Range(2.0f, 3.0f);
-		Points = { FVector3f(0, 0, Radius * 1.4f), Out * Reach * 0.35f + FVector3f(0, 0, Radius * 0.4f), Out * Reach + FVector3f(0, 0, -Radius * 0.4f) };
+		Points = { FVector3f(0, 0, Radius * 1.4f), Dir * Reach * 0.35f + FVector3f(0, 0, Radius * 0.4f), Dir * Reach + FVector3f(0, 0, -Radius * 0.4f) };
 		Radii = { Radius * 0.5f, Radius * 0.35f, 2.0f };
 		B.Tube(Points, Radii, 6);
 	}
@@ -1459,6 +1474,7 @@ void ATerrainStreamer::ComputeProps(const FIntPoint& Coord, EProps Level, FJobRe
 	AddLighthouses(Coord, Batch);
 	AddVolcanoGlow(Coord, Batch);
 	AddFloatingIslands(Coord, Batch);
+	AddDiscoveries(Coord, Batch);
 	if (Level == EProps::Trees)
 	{
 		AddVegetation(Coord, Batch, true);
@@ -1859,6 +1875,11 @@ void ATerrainStreamer::AddVillages(const FIntPoint& Coord, FPropBatch& Batch) co
 					High = FMath::Max(High, WorldGen::Height(C.X, C.Y));
 				}
 				const FVector Base(Pos.X, Pos.Y, High + 40.0f);
+				static const bool bReportHouses = FParse::Param(FCommandLine::Get(), TEXT("HouseReport"));
+				if (bReportHouses)
+				{
+					UE_LOG(LogTemp, Display, TEXT("HouseReport: x=%.0f y=%.0f z=%.0f yaw=%.0f w=%.0f d=%.0f floors=%d"), Base.X, Base.Y, Base.Z, Yaw, Plan.Width, Plan.Depth, bTwoStorey ? 2 : 1);
+				}
 				const FLinearColor Wash = bAdobe ? FLinearColor(1.15f, 0.95f, 0.75f) : Jitter(Plaster[FMath::FloorToInt(House.Next() * 3) % 3] * 0.65f, House.Next(), 0.05f);
 				const FQuat HouseQuat = Rot.Quaternion();
 				for (const HouseGen::FPiece& Piece : Plan.Pieces)
@@ -1934,6 +1955,320 @@ void ATerrainStreamer::AddStoneCircles(const FIntPoint& Coord, FPropBatch& Batch
 			}
 		}
 	}
+}
+
+double ATerrainStreamer::RuinCellSize() { return RuinCell; }
+double ATerrainStreamer::ObeliskCellSize() { return ObeliskCell; }
+double ATerrainStreamer::WorldTreeCellSize() { return WorldTreeCell; }
+double ATerrainStreamer::SkyGateCellSize() { return SkyGateCell; }
+double ATerrainStreamer::WindFarmCellSize() { return WindFarmCell; }
+
+bool ATerrainStreamer::FindRuin(int32 CX, int32 CY, FVector& OutCenter)
+{
+	FRandom Rand{ CX, CY, SeedRuin };
+	if (Rand.Next() > 0.3f)
+	{
+		return false;
+	}
+	OutCenter = FVector((CX + Rand.Range(0.2f, 0.8f)) * RuinCell, (CY + Rand.Range(0.2f, 0.8f)) * RuinCell, 0.0);
+	const FWorldSample S = WorldGen::Sample(OutCenter.X, OutCenter.Y);
+	OutCenter.Z = S.Height;
+	return S.Height >= 400.0f && S.Height <= 25000.0f && S.Mountains <= 0.4f && S.Volcano <= 0.0f && S.Biome != EBiome::Beach && S.Biome != EBiome::Snow;
+}
+
+bool ATerrainStreamer::FindObelisks(int32 CX, int32 CY, FVector& OutCenter)
+{
+	FRandom Rand{ CX, CY, SeedObelisk };
+	if (Rand.Next() > 0.28f)
+	{
+		return false;
+	}
+	OutCenter = FVector((CX + Rand.Range(0.2f, 0.8f)) * ObeliskCell, (CY + Rand.Range(0.2f, 0.8f)) * ObeliskCell, 0.0);
+	const FWorldSample S = WorldGen::Sample(OutCenter.X, OutCenter.Y);
+	OutCenter.Z = S.Height;
+	return S.Height >= 400.0f && S.Mountains <= 0.5f && S.Volcano <= 0.0f && S.Biome != EBiome::Beach;
+}
+
+bool ATerrainStreamer::FindWorldTree(int32 CX, int32 CY, FVector& OutBase)
+{
+	FRandom Rand{ CX, CY, SeedWorldTree };
+	if (Rand.Next() > 0.4f)
+	{
+		return false;
+	}
+	OutBase = FVector((CX + Rand.Range(0.2f, 0.8f)) * WorldTreeCell, (CY + Rand.Range(0.2f, 0.8f)) * WorldTreeCell, 0.0);
+	const FWorldSample S = WorldGen::Sample(OutBase.X, OutBase.Y);
+	OutBase.Z = S.Height;
+	return S.Height >= 400.0f && S.Height <= 12000.0f && S.Moisture > 0.4f && S.Mountains <= 0.2f && S.Volcano <= 0.0f && S.Biome != EBiome::Desert && S.Biome != EBiome::Snow && S.Biome != EBiome::Beach;
+}
+
+bool ATerrainStreamer::FindSkyGate(int32 CX, int32 CY, FVector& OutCenter)
+{
+	FRandom Rand{ CX, CY, SeedSkyGate };
+	if (Rand.Next() > 0.35f)
+	{
+		return false;
+	}
+	OutCenter = FVector((CX + Rand.Range(0.15f, 0.85f)) * SkyGateCell, (CY + Rand.Range(0.15f, 0.85f)) * SkyGateCell, 0.0);
+	// A gate hangs 250-450 m up, over land or sea.
+	OutCenter.Z = FMath::Max(WorldGen::Height(OutCenter.X, OutCenter.Y), 0.0f) + Rand.Range(25000.0f, 45000.0f);
+	return true;
+}
+
+bool ATerrainStreamer::FindWindFarm(int32 CX, int32 CY, FVector& OutCenter)
+{
+	FRandom Rand{ CX, CY, SeedWindFarm };
+	if (Rand.Next() > 0.35f)
+	{
+		return false;
+	}
+	OutCenter = FVector((CX + Rand.Range(0.25f, 0.75f)) * WindFarmCell, (CY + Rand.Range(0.25f, 0.75f)) * WindFarmCell, 0.0);
+	const FWorldSample S = WorldGen::Sample(OutCenter.X, OutCenter.Y);
+	OutCenter.Z = S.Height;
+	return S.Height >= 500.0f && S.Height <= 8000.0f && S.Mountains <= 0.15f && S.Volcano <= 0.0f && S.TreeDensity < 0.35f && S.Biome != EBiome::Snow && S.Biome != EBiome::Beach;
+}
+
+void ATerrainStreamer::AddDiscoveries(const FIntPoint& Coord, FPropBatch& Batch) const
+{
+	const FVector2D Min(Coord.X * ChunkWorldSize(), Coord.Y * ChunkWorldSize());
+	const FVector2D Max = Min + FVector2D(ChunkWorldSize());
+	auto ForCells = [&](double Cell, double Radius, TFunctionRef<void(int32, int32)> Fn)
+	{
+		for (int32 CY = FMath::FloorToInt((Min.Y - Radius) / Cell); CY <= FMath::FloorToInt((Max.Y + Radius) / Cell); ++CY)
+		{
+			for (int32 CX = FMath::FloorToInt((Min.X - Radius) / Cell); CX <= FMath::FloorToInt((Max.X + Radius) / Cell); ++CX)
+			{
+				Fn(CX, CY);
+			}
+		}
+	};
+	auto Owns = [&](const FVector& P) { return P.X >= Min.X && P.X < Max.X && P.Y >= Min.Y && P.Y < Max.Y; };
+	const FLinearColor Sandstone(1.55f, 1.42f, 1.22f);
+	const FLinearColor Basalt(0.22f, 0.22f, 0.25f);
+	const FLinearColor Cyan(0.25f, 0.75f, 1.0f);
+
+	// Ancient ruins: a platform, a colonnade of which some columns stand, some are broken and some
+	// have fallen, an arch, and an altar.
+	ForCells(RuinCell, RuinRadius, [&](int32 CX, int32 CY)
+	{
+		FVector C;
+		if (!FindRuin(CX, CY, C))
+		{
+			return;
+		}
+		FRandom Rand{ CX, CY, SeedRuin + 1 };
+		const float Yaw = Rand.Range(0.0f, 360.0f);
+		const FRotator Rot(0, Yaw, 0);
+		float High = C.Z;
+		for (const FVector2D K : { FVector2D(-1, -1), FVector2D(1, -1), FVector2D(-1, 1), FVector2D(1, 1) })
+		{
+			const FVector P = C + Rot.RotateVector(FVector(K.X * 3200.0f, K.Y * 2200.0f, 0.0f));
+			High = FMath::Max(High, WorldGen::Height(P.X, P.Y));
+		}
+		const float Floor = High + 60.0f;
+		auto Local = [&](float X, float Y, float Z) { return FVector(C.X, C.Y, 0.0) + Rot.RotateVector(FVector(X, Y, 0.0f)) + FVector(0, 0, Z); };
+		auto Place = [&](EPropPart Part, const FVector& P, const FRotator& R, const FVector& Size, const FLinearColor& Color, float Glow = 0.0f)
+		{
+			if (Owns(P))
+			{
+				Batch.Add(Part, P, R, Size, Color, Glow, SurfConcrete);
+			}
+		};
+		// Stepped platform, sunk into the slope.
+		Place(Cube, Local(0, 0, (High - 500.0f + Floor) * 0.5f), Rot, FVector(6800, 4800, Floor - High + 500.0f), Sandstone * 0.85f);
+		Place(Cube, Local(0, 0, Floor + 40.0f), Rot, FVector(6200, 4200, 80), Sandstone);
+		const float Top = Floor + 80.0f;
+		// Two rows of columns.
+		for (int32 Row = 0; Row < 2; ++Row)
+		{
+			for (int32 i = 0; i < 9; ++i)
+			{
+				const float X = -2800.0f + i * 700.0f;
+				const float Y = Row == 0 ? -1500.0f : 1500.0f;
+				const float Roll = Rand.Next();
+				const FVector Base = Local(X, Y, Top);
+				if (Roll < 0.55f)
+				{
+					// Standing, with a capital; neighbours in a row sometimes share a lintel.
+					Place(Cylinder, Base + FVector(0, 0, 550.0f), FRotator::ZeroRotator, FVector(110, 110, 1100), Sandstone);
+					Place(Cube, Base + FVector(0, 0, 1130.0f), Rot, FVector(160, 160, 60), Sandstone * 0.95f);
+					if (i + 1 < 9 && Rand.Next() < 0.6f)
+					{
+						Place(Cube, Local(X + 350.0f, Y, Top + 1190.0f), Rot, FVector(760, 150, 100), Sandstone * 0.9f);
+					}
+				}
+				else if (Roll < 0.8f)
+				{
+					// Broken off partway.
+					const float H = Rand.Range(150.0f, 700.0f);
+					Place(Cylinder, Base + FVector(0, 0, H * 0.5f), FRotator::ZeroRotator, FVector(110, 110, H), Sandstone * 0.9f);
+				}
+				else
+				{
+					// Fallen and lying across the floor.
+					const float L = Rand.Range(500.0f, 1000.0f);
+					const float FallYaw = Yaw + Rand.Range(-40.0f, 40.0f) + 90.0f;
+					Place(Cylinder, Base + FVector(0, 0, 55.0f), FRotator(90, FallYaw, 0), FVector(110, 110, L), Sandstone * 0.9f);
+				}
+			}
+		}
+		// A tall arch and an altar between the rows.
+		Place(Cylinder, Local(-3400.0f, 0, Top + 700.0f), FRotator::ZeroRotator, FVector(160, 160, 1400), Sandstone);
+		Place(Cylinder, Local(-3400.0f, 700.0f, Top + 700.0f), FRotator::ZeroRotator, FVector(160, 160, 1400), Sandstone);
+		Place(Cube, Local(-3400.0f, 350.0f, Top + 1450.0f), Rot, FVector(240, 1000, 160), Sandstone);
+		Place(Cube, Local(0, 0, Top + 60.0f), Rot, FVector(500, 260, 120), Sandstone * 0.85f);
+	});
+
+	// Obelisks: a ring of tall dark monoliths with a glowing seam, around a floating light.
+	ForCells(ObeliskCell, ObeliskRadius, [&](int32 CX, int32 CY)
+	{
+		FVector C;
+		if (!FindObelisks(CX, CY, C))
+		{
+			return;
+		}
+		FRandom Rand{ CX, CY, SeedObelisk + 1 };
+		const int32 Count = 7 + FMath::FloorToInt(Rand.Next() * 4.0f);
+		const float Ring = Rand.Range(2800.0f, 3600.0f);
+		for (int32 i = 0; i < Count; ++i)
+		{
+			const float A = 2.0f * PI * i / Count;
+			const FVector2D P(C.X + FMath::Cos(A) * Ring, C.Y + FMath::Sin(A) * Ring);
+			const FVector Ground(P.X, P.Y, WorldGen::Height(P.X, P.Y));
+			const float H = Rand.Range(2200.0f, 4200.0f);
+			const FRotator R(Rand.Range(-2.0f, 2.0f), A * 57.2958f + 90.0f, Rand.Range(-2.0f, 2.0f));
+			if (Owns(Ground))
+			{
+				Batch.Add(Cube, Ground + FVector(0, 0, H * 0.5f - 200.0f), R, FVector(240, 240, H), Basalt, 0.0f, SurfRock);
+				// Glowing seam down the face that looks at the centre.
+				const FVector Inward = R.RotateVector(FVector(0, 1, 0));
+				Batch.Add(Cube, Ground + FVector(0, 0, H * 0.5f - 200.0f) - Inward * 121.0f, R, FVector(40, 30, H * 0.7f), Cyan, 6.0f, SurfConcrete);
+			}
+		}
+		const FVector Orb(C.X, C.Y, WorldGen::Height(C.X, C.Y) + 1800.0f);
+		if (Owns(Orb))
+		{
+			Batch.Add(Sphere, Orb, FRotator::ZeroRotator, FVector(420, 420, 420), Cyan, 14.0f, SurfConcrete);
+			Batch.Add(Sphere, Orb, FRotator::ZeroRotator, FVector(620, 620, 620), Cyan * 0.3f, 3.0f, SurfConcrete);
+		}
+	});
+
+	// The World Tree: a scanned tree grown to the height of a skyscraper.
+	ForCells(WorldTreeCell, WorldTreeRadius, [&](int32 CX, int32 CY)
+	{
+		FVector C;
+		if (!FindWorldTree(CX, CY, C) || !Owns(C))
+		{
+			return;
+		}
+		FRandom Rand{ CX, CY, SeedWorldTree + 1 };
+		const FRotator Spin(0, Rand.Range(0.0f, 360.0f), 0);
+		if (NumLoadedScanned > 0 && MatureSlots.Num() > 0)
+		{
+			const int32 Slot = MatureSlots[FMath::FloorToInt(Rand.Next() * MatureSlots.Num()) % MatureSlots.Num()];
+			Batch.Add(static_cast<EPropPart>(Scanned0 + Slot), C - FVector(0, 0, 100.0f), Spin, FVector(4.5f), White);
+			Batch.Add(Trunk, C + FVector(0, 0, 900.0f), Spin, FVector(360, 360, 1800), White);
+		}
+		else
+		{
+			const FTreeTemplate& T = TreeTemplates[TreeJungle];
+			const float Scale = 7.0f;
+			Batch.Add(static_cast<EPropPart>(Tree0 + TreeJungle), C, Spin, FVector(Scale), BarkPale);
+			for (const FTreeTemplate::FTip& Tip : T.Tips)
+			{
+				const float W = Tip.Size * Scale;
+				Batch.Add(Bush, C + Spin.RotateVector(Tip.Position * Scale), FRotator(0, Rand.Range(0.0f, 360.0f), 0), FVector(W, W, W * 0.7f), Jitter(LeafJungle, Rand.Next()));
+			}
+			Batch.Add(Trunk, C + FVector(0, 0, 900.0f), Spin, FVector(800, 800, 1800), White);
+		}
+	});
+
+	// Sky gates: colossal stone rings hanging in the air, glowing on the inside, to fly through.
+	ForCells(SkyGateCell, SkyGateRadius, [&](int32 CX, int32 CY)
+	{
+		FVector C;
+		if (!FindSkyGate(CX, CY, C))
+		{
+			return;
+		}
+		FRandom Rand{ CX, CY, SeedSkyGate + 1 };
+		const float Yaw = Rand.Range(0.0f, 360.0f);
+		const FRotator Rot(0, Yaw, 0);
+		const float R = Rand.Range(9000.0f, 13000.0f);
+		const int32 Blocks = 40;
+		const float Arc = 2.0f * PI * R / Blocks;
+		for (int32 i = 0; i < Blocks; ++i)
+		{
+			const float A = 2.0f * PI * i / Blocks;
+			const FVector P = C + Rot.RotateVector(FVector(0, FMath::Cos(A) * R, FMath::Sin(A) * R));
+			if (!Owns(P))
+			{
+				continue;
+			}
+			const FRotator BlockRot(0.0f, Yaw, A * 57.2958f);
+			Batch.Add(Cube, P, BlockRot, FVector(1800, 1300, Arc + 60.0f), Basalt * 1.6f, 0.0f, SurfRock);
+			const FVector Inner = C + Rot.RotateVector(FVector(0, FMath::Cos(A) * (R - 660.0f), FMath::Sin(A) * (R - 660.0f)));
+			Batch.Add(Cube, Inner, BlockRot, FVector(1500, 40, Arc * 0.85f), Cyan, 5.0f, SurfConcrete);
+		}
+		// A few stones drifting near the ring.
+		for (int32 i = 0; i < 6; ++i)
+		{
+			const FVector P = C + Rot.RotateVector(FVector(Rand.Range(-3000.0f, 3000.0f), Rand.Range(-1.4f, 1.4f) * R, Rand.Range(-1.4f, 1.4f) * R));
+			if (Owns(P))
+			{
+				const float S = Rand.Range(300.0f, 900.0f);
+				Batch.Add(Rock, P, FRotator(Rand.Range(0, 360), Rand.Range(0, 360), Rand.Range(0, 360)), FVector(S), White);
+			}
+		}
+	});
+
+	// Wind farms: ranks of turbines on open ground.
+	ForCells(WindFarmCell, WindFarmRadius, [&](int32 CX, int32 CY)
+	{
+		FVector C;
+		if (!FindWindFarm(CX, CY, C))
+		{
+			return;
+		}
+		FRandom Rand{ CX, CY, SeedWindFarm + 1 };
+		const float Yaw = Rand.Range(0.0f, 360.0f);
+		const FRotator Rot(0, Yaw, 0);
+		const float WindYaw = Yaw + 90.0f + Rand.Range(-25.0f, 25.0f);
+		const FRotator Facing(0, WindYaw, 0);
+		const FLinearColor Paint(1.9f, 1.9f, 1.9f);
+		for (int32 Row = -1; Row <= 1; ++Row)
+		{
+			for (int32 Col = -3; Col <= 3; ++Col)
+			{
+				const FVector Off = Rot.RotateVector(FVector(Col * 5500.0f + Rand.Range(-600.0f, 600.0f), Row * 6500.0f + Rand.Range(-800.0f, 800.0f), 0.0f));
+				const FVector2D P(C.X + Off.X, C.Y + Off.Y);
+				if (!(P.X >= Min.X && P.X < Max.X && P.Y >= Min.Y && P.Y < Max.Y))
+				{
+					continue;
+				}
+				const float Ground = WorldGen::Height(P.X, P.Y);
+				if (Ground < 300.0f)
+				{
+					continue;
+				}
+				const FVector Base(P.X, P.Y, Ground);
+				const float TowerH = 8500.0f;
+				Batch.Add(Cylinder, Base + FVector(0, 0, TowerH * 0.5f - 100.0f), FRotator::ZeroRotator, FVector(420, 420, TowerH), Paint, 0.0f, SurfConcrete);
+				const FVector Hub = Base + FVector(0, 0, TowerH + 200.0f);
+				Batch.Add(Cube, Hub + Facing.RotateVector(FVector(-150, 0, 0)), Facing, FVector(900, 330, 330), Paint, 0.0f, SurfConcrete);
+				Batch.Add(Sphere, Hub + Facing.RotateVector(FVector(330, 0, 0)), Facing, FVector(300, 300, 300), Paint, 0.0f, SurfConcrete);
+				const float Phase = Rand.Range(0.0f, 120.0f);
+				for (int32 b = 0; b < 3; ++b)
+				{
+					const float Bd = Phase + b * 120.0f;
+					const float Br = FMath::DegreesToRadians(Bd);
+					const float L = 4200.0f;
+					const FVector Offset = Facing.RotateVector(FVector(360.0f, -FMath::Sin(Br) * L * 0.5f, FMath::Cos(Br) * L * 0.5f));
+					Batch.Add(Cube, Hub + Offset, FRotator(0.0f, WindYaw, Bd), FVector(40, 260, L), Paint, 0.0f, SurfConcrete);
+				}
+			}
+		}
+	});
 }
 
 void ATerrainStreamer::AddCities(const FIntPoint& Coord, FPropBatch& Batch) const

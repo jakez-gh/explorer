@@ -93,6 +93,16 @@ public:
 	static bool FindFloatingIsland(int32 CellX, int32 CellY, FVector& OutTop, float& OutRadius);
 	static bool FindLighthouse(int32 CellX, int32 CellY, FVector& OutBase);
 	static bool FindStoneCircle(int32 CellX, int32 CellY, FVector& OutCenter);
+	static bool FindRuin(int32 CellX, int32 CellY, FVector& OutCenter);
+	static bool FindObelisks(int32 CellX, int32 CellY, FVector& OutCenter);
+	static bool FindWorldTree(int32 CellX, int32 CellY, FVector& OutBase);
+	static bool FindSkyGate(int32 CellX, int32 CellY, FVector& OutCenter);
+	static bool FindWindFarm(int32 CellX, int32 CellY, FVector& OutCenter);
+	static double RuinCellSize();
+	static double ObeliskCellSize();
+	static double WorldTreeCellSize();
+	static double SkyGateCellSize();
+	static double WindFarmCellSize();
 	static double VillageCellSize();
 	static double CityCellSize();
 	static double IslandCellSize();
@@ -271,6 +281,7 @@ private:
 	void AddVegetation(const FIntPoint& Coord, FPropBatch& Batch, bool bTreesOnly) const;
 	void AddVillages(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddStoneCircles(const FIntPoint& Coord, FPropBatch& Batch) const;
+	void AddDiscoveries(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddCities(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddLighthouses(const FIntPoint& Coord, FPropBatch& Batch) const;
 	void AddVolcanoGlow(const FIntPoint& Coord, FPropBatch& Batch) const;

@@ -139,6 +139,11 @@ APawn* AExplorerGameMode::SpawnDefaultPawnFor_Implementation(AController* NewPla
 		Report(TEXT("floating island"), ATerrainStreamer::IslandCellSize(), [](int32 X, int32 Y, FVector& P) { float R; return ATerrainStreamer::FindFloatingIsland(X, Y, P, R); });
 		Report(TEXT("lighthouse"), ATerrainStreamer::LighthouseCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindLighthouse(X, Y, P); });
 		Report(TEXT("stone circle"), ATerrainStreamer::StoneCircleCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindStoneCircle(X, Y, P); });
+		Report(TEXT("ruin"), ATerrainStreamer::RuinCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindRuin(X, Y, P); });
+		Report(TEXT("obelisk circle"), ATerrainStreamer::ObeliskCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindObelisks(X, Y, P); });
+		Report(TEXT("world tree"), ATerrainStreamer::WorldTreeCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindWorldTree(X, Y, P); });
+		Report(TEXT("sky gate"), ATerrainStreamer::SkyGateCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindSkyGate(X, Y, P); });
+		Report(TEXT("wind farm"), ATerrainStreamer::WindFarmCellSize(), [](int32 X, int32 Y, FVector& P) { return ATerrainStreamer::FindWindFarm(X, Y, P); });
 		Report(TEXT("volcano"), WorldGen::VolcanoCellSize(), [](int32 X, int32 Y, FVector& P)
 		{
 			FVector2D C; float R, H;

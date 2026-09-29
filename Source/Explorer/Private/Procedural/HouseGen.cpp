@@ -313,6 +313,54 @@ FHouse Generate(uint32 Seed, EStyle Style, bool bTwoStoreys)
 		TArray<FWall> Walls;
 		Split(Inside, FloorRand, 0, Rooms, Walls);
 
+		// A wall added by a later split can end exactly where an earlier wall's doorway is, blocking it.
+		// Move each doorway to the middle of the widest stretch of its wall that no other wall meets.
+		for (FWall& Wl : Walls)
+		{
+			if (Wl.Openings.Num() == 0)
+			{
+				continue;
+			}
+			TArray<float> Meets;
+			Meets.Add(Wl.From);
+			for (const FWall& V : Walls)
+			{
+				if (V.bAlongX == Wl.bAlongX || V.Fixed <= Wl.From || V.Fixed >= Wl.To)
+				{
+					continue;
+				}
+				if (FMath::IsNearlyEqual(V.From, Wl.Fixed, 2.0f) || FMath::IsNearlyEqual(V.To, Wl.Fixed, 2.0f))
+				{
+					Meets.Add(V.Fixed);
+				}
+			}
+			Meets.Add(Wl.To);
+			Meets.Sort();
+			const float Margin = InnerWall * 0.5f + 25.0f;
+			FOpening& Door = Wl.Openings[0];
+			bool bBlocked = false;
+			for (int32 m = 1; m + 1 < Meets.Num(); ++m)
+			{
+				bBlocked |= FMath::Abs(Meets[m] - Door.At) < Door.Width * 0.5f + Margin + 10.0f;
+			}
+			if (!bBlocked)
+			{
+				continue;
+			}
+			float BestLen = 0.0f, BestAt = Door.At;
+			for (int32 m = 0; m + 1 < Meets.Num(); ++m)
+			{
+				const float Lo = Meets[m] + (m == 0 ? Margin : Margin);
+				const float Hi = Meets[m + 1] - (m + 2 == Meets.Num() ? Margin : Margin);
+				if (Hi - Lo > BestLen && Hi - Lo >= Door.Width + 20.0f)
+				{
+					BestLen = Hi - Lo;
+					BestAt = (Lo + Hi) * 0.5f;
+				}
+			}
+			Door.At = BestAt;
+		}
+
 		// Room types: ground floor living/kitchen/dining/bath; upper floor bedrooms/bath. Bigger rooms first.
 		Rooms.Sort([](const FRect& A, const FRect& B) { return A.Area() > B.Area(); });
 		TArray<ERoom> Types;
