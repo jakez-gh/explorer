@@ -617,28 +617,36 @@ FHouse GenerateFamilyHouse1719()
 				if (!Skipped(X, Y, A1, B1)) Tinted(ESurface::InteriorWall, Base, X, Y, Z, A1, B1, Z + 1.0f);
 			}
 		}
-		const FLinearColor Shades[] = { FLinearColor(0.20f, 0.11f, 0.06f), FLinearColor(0.50f, 0.34f, 0.19f), FLinearColor(0.72f, 0.54f, 0.34f), FLinearColor(0.28f, 0.17f, 0.09f) };
-		for (int32 i = 0; X0 + i * 50.0f < X1; ++i)
+		// Random spots, like a calico cat: a brown carpet dotted with irregular clusters of tan, darker brown and
+		// a few pale patches, each cluster two or three overlapping rounded blobs of different sizes.
+		const FLinearColor Shades[] = { FLinearColor(0.16f, 0.09f, 0.05f), FLinearColor(0.62f, 0.44f, 0.26f), FLinearColor(0.80f, 0.64f, 0.42f), FLinearColor(0.16f, 0.09f, 0.05f), FLinearColor(0.90f, 0.78f, 0.58f) };
+		int32 Count = 0;
+		for (int32 i = 0; X0 + i * 40.0f < X1; ++i)
 		{
-			for (int32 j = 0; Y0 + j * 50.0f < Y1; ++j)
+			for (int32 j = 0; Y0 + j * 40.0f < Y1; ++j)
 			{
-				const float Size = 42.0f + 34.0f * WorldGen::HashFloat(i * 5 + 1, j * 3 + 2, 1723);
-				const float CX = X0 + i * 50.0f + 25.0f + (WorldGen::HashFloat(i, j, 1724) - 0.5f) * 20.0f;
-				const float CY = Y0 + j * 50.0f + 25.0f + (WorldGen::HashFloat(i, j, 1725) - 0.5f) * 20.0f;
-				if (CX - Size * 0.7f < X0 || CX + Size * 0.7f > X1 || CY - Size * 0.7f < Y0 || CY + Size * 0.7f > Y1) continue;
-				if (Skipped(CX - Size * 0.7f, CY - Size * 0.7f, CX + Size * 0.7f, CY + Size * 0.7f)) continue;
-				const FLinearColor C = Shades[FMath::FloorToInt(WorldGen::HashFloat(i * 7 + 3, j * 11 + 5, 1726) * 4.0f) % 4];
-				const float Top = Z + 1.0f + 0.1f * (1 + (i + 2 * j) % 5);
-				for (const float Yaw : { 0.0f, 45.0f })
+				if (WorldGen::HashFloat(i * 3 + 9, j * 7 + 4, 1730) > 0.3f) continue;   // about a third of cells start a spot
+				const FLinearColor C = Shades[FMath::FloorToInt(WorldGen::HashFloat(i * 5 + 1, j * 9 + 2, 1731) * 5.0f) % 5];
+				const int32 Blobs = 1 + FMath::FloorToInt(WorldGen::HashFloat(i, j, 1732) * 3.0f);
+				for (int32 b = 0; b < Blobs; ++b)
 				{
-					FPiece P;
-					P.Surface = ESurface::InteriorWall;
-					P.Center = FVector(CX, CY, (Z + 1.0f + Top) * 0.5f);
-					P.Size = FVector(Size, Size, Top - Z - 1.0f + 0.02f);
-					P.Rotation = FRotator(0.0f, Yaw, 0.0f);
-					P.bTinted = true;
-					P.Tint = C;
-					House.Pieces.Add(P);
+					const float Size = 18.0f + 80.0f * FMath::Square(WorldGen::HashFloat(i * 11 + b, j * 13 + b, 1733));
+					const float CX = X0 + i * 40.0f + 20.0f + (WorldGen::HashFloat(i * 17 + b, j, 1734) - 0.5f) * 60.0f;
+					const float CY = Y0 + j * 40.0f + 20.0f + (WorldGen::HashFloat(i, j * 19 + b, 1735) - 0.5f) * 60.0f;
+					if (CX - Size * 0.7f < X0 || CX + Size * 0.7f > X1 || CY - Size * 0.7f < Y0 || CY + Size * 0.7f > Y1) continue;
+					if (Skipped(CX - Size * 0.7f, CY - Size * 0.7f, CX + Size * 0.7f, CY + Size * 0.7f)) continue;
+					const float Top = Z + 1.0f + 0.05f * (1 + (Count++ % 60));
+					for (const float Yaw : { 0.0f, 45.0f })
+					{
+						FPiece P;
+						P.Surface = ESurface::InteriorWall;
+						P.Center = FVector(CX, CY, (Z + 1.0f + Top) * 0.5f);
+						P.Size = FVector(Size, Size, Top - Z - 1.0f + 0.02f);
+						P.Rotation = FRotator(0.0f, Yaw + WorldGen::HashFloat(i, j, 1736) * 40.0f, 0.0f);
+						P.bTinted = true;
+						P.Tint = C;
+						House.Pieces.Add(P);
+					}
 				}
 			}
 		}
