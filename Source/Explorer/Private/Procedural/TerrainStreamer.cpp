@@ -2616,6 +2616,7 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 					if (Piece.Surface == HouseGen::ESurface::ExteriorWall) Tint = FLinearColor(0.85f, 0.97f, 1.25f); // light grey-blue vinyl
 					else if (Piece.Surface == HouseGen::ESurface::Wood && (FMath::Abs(Piece.Center.X) > Plan.Width * 0.5f - 30.0f || FMath::Abs(Piece.Center.Y) > Plan.Depth * 0.5f - 30.0f) && Piece.Center.Z > -10.0f) Tint = FLinearColor(0.4f, 0.22f, 0.13f); // brown trim
 					else if (Piece.Surface == HouseGen::ESurface::InteriorWall) Tint = FLinearColor(1.25f, 1.02f, 0.78f);
+					else if (Piece.Surface == HouseGen::ESurface::SlateRoof || Piece.Surface == HouseGen::ESurface::ClayRoof) Tint = FLinearColor(1.9f, 1.9f, 1.95f); // light grey asphalt shingles
 				}
 				HouseGen::ESurface Surface = Piece.Surface;
 				if (!Lot->bFamilyHouse)

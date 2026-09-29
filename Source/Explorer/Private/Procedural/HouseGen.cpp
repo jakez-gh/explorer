@@ -864,8 +864,8 @@ FHouse GenerateFamilyHouse1719()
 	Exterior(false, -HX, 0.0f, Wall, { { 400.0f, 130.0f, WinB, WinT, true }, { 110.0f, 110.0f, WinB, WinT, true }, { -180.0f, 100.0f, WinB, WinT, true } });
 	Exterior(false, HX, 0.0f, Wall, { { 400.0f, 120.0f, WinB, WinT, true }, { 110.0f, 100.0f, WinB, WinT, true }, { -130.0f, 60.0f, 140.0f, 210.0f, true }, { -250.0f, 60.0f, 140.0f, 210.0f, true } });
 	// Central hall (x -50..50): stairs up in the middle of the house, cellar door at the back.
-	Interior(false, -50.0f, -528.0f, 270.0f, 0.0f, Wall, { 150.0f, -180.0f, -420.0f });
-	Interior(false, 50.0f, -528.0f, 270.0f, 0.0f, Wall, { 150.0f, -250.0f, -420.0f });
+	Interior(false, -50.0f, -528.0f, 270.0f, 0.0f, Wall, { 150.0f, 20.0f });   // the stairs fill the hall behind y = -100, so doors stay in front of them
+	Interior(false, 50.0f, -528.0f, 270.0f, 0.0f, Wall, { 150.0f, 20.0f });
 	Interior(true, 270.0f, -HX + 11.0f, -50.0f, 0.0f, Wall, {});                        // master bedroom's front wall (living beyond)
 	Interior(true, 270.0f, 50.0f, 150.0f, 0.0f, Wall, {});                              // kitchen / family room, then the bar
 	Box(ESurface::Wood, 150.0f, 250.0f, 0.0f, HX - 12.0f, 290.0f, 100.0f);             // breakfast bar counter base
@@ -1012,7 +1012,7 @@ FHouse GenerateFamilyHouse1719()
 	}
 	else
 	{
-		const float Rise = GableRoofY(0.0f, 0.0f, HX, HY, Top, 44.0f, ESurface::SlateRoof);
+		const float Rise = GableRoofY(0.0f, 0.0f, HX, HY, Top, 44.0f, ESurface::SlateRoof);  // light grey asphalt shingles (tinted in the streamer)
 		House.Height = Top + Rise;
 		// Upstairs ceilings: the angled parts under the roof slopes are painted the wall's light blue; the flat middle is white.
 		const float FlatZ = Z1 + 240.0f;
