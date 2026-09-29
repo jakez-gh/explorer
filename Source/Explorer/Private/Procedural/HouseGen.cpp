@@ -598,56 +598,18 @@ FHouse GenerateFamilyHouse1719()
 	const FLinearColor Black(0.03f, 0.03f, 0.03f), Orange(1.6f, 0.45f, 0.06f), Cinder(0.95f, 0.95f, 0.92f), AsphaltC(0.12f, 0.12f, 0.13f);
 
 	struct FHole { float X0, Y0, X1, Y1; };
-	// Brown-and-tan carpet, the same on the front room, the stairs and the whole upper floor: a mid-brown base laid in
-	// 30 cm plates, with roundish (octagonal) patches of darker and lighter brown on top at slightly different heights
-	// so overlapping patches never z-fight. Areas touching a Skip rectangle are left bare.
+	// Brown carpet with 1-3 inch roundish spots of tan and darker brown (a procedural material), the same on every floor
+	// except the kitchen and bathrooms, and on the stairs going up. Areas touching a Skip rectangle are left bare.
 	auto Carpet = [&](float X0, float Y0, float X1, float Y1, float Z, std::initializer_list<FHole> Skips)
 	{
-		auto Skipped = [&](float A0, float B0, float A1, float B1)
+		for (float X = X0; X < X1 - 1.0f; X += 60.0f)
 		{
-			for (const FHole& H : Skips) if (A1 > H.X0 && A0 < H.X1 && B1 > H.Y0 && B0 < H.Y1) return true;
-			return false;
-		};
-		const FLinearColor Base(0.36f, 0.23f, 0.12f);
-		for (float X = X0; X < X1 - 1.0f; X += 30.0f)
-		{
-			for (float Y = Y0; Y < Y1 - 1.0f; Y += 30.0f)
+			for (float Y = Y0; Y < Y1 - 1.0f; Y += 60.0f)
 			{
-				const float A1 = FMath::Min(X + 30.0f, X1), B1 = FMath::Min(Y + 30.0f, Y1);
-				if (!Skipped(X, Y, A1, B1)) Tinted(ESurface::InteriorWall, Base, X, Y, Z, A1, B1, Z + 1.0f);
-			}
-		}
-		// Random spots, like a calico cat: a brown carpet dotted with irregular clusters of tan, darker brown and
-		// a few pale patches, each cluster two or three overlapping rounded blobs of different sizes.
-		const FLinearColor Shades[] = { FLinearColor(0.16f, 0.09f, 0.05f), FLinearColor(0.62f, 0.44f, 0.26f), FLinearColor(0.80f, 0.64f, 0.42f), FLinearColor(0.16f, 0.09f, 0.05f), FLinearColor(0.90f, 0.78f, 0.58f) };
-		int32 Count = 0;
-		for (int32 i = 0; X0 + i * 40.0f < X1; ++i)
-		{
-			for (int32 j = 0; Y0 + j * 40.0f < Y1; ++j)
-			{
-				if (WorldGen::HashFloat(i * 3 + 9, j * 7 + 4, 1730) > 0.3f) continue;   // about a third of cells start a spot
-				const FLinearColor C = Shades[FMath::FloorToInt(WorldGen::HashFloat(i * 5 + 1, j * 9 + 2, 1731) * 5.0f) % 5];
-				const int32 Blobs = 1 + FMath::FloorToInt(WorldGen::HashFloat(i, j, 1732) * 3.0f);
-				for (int32 b = 0; b < Blobs; ++b)
-				{
-					const float Size = 18.0f + 80.0f * FMath::Square(WorldGen::HashFloat(i * 11 + b, j * 13 + b, 1733));
-					const float CX = X0 + i * 40.0f + 20.0f + (WorldGen::HashFloat(i * 17 + b, j, 1734) - 0.5f) * 60.0f;
-					const float CY = Y0 + j * 40.0f + 20.0f + (WorldGen::HashFloat(i, j * 19 + b, 1735) - 0.5f) * 60.0f;
-					if (CX - Size * 0.7f < X0 || CX + Size * 0.7f > X1 || CY - Size * 0.7f < Y0 || CY + Size * 0.7f > Y1) continue;
-					if (Skipped(CX - Size * 0.7f, CY - Size * 0.7f, CX + Size * 0.7f, CY + Size * 0.7f)) continue;
-					const float Top = Z + 1.0f + 0.05f * (1 + (Count++ % 60));
-					for (const float Yaw : { 0.0f, 45.0f })
-					{
-						FPiece P;
-						P.Surface = ESurface::InteriorWall;
-						P.Center = FVector(CX, CY, (Z + 1.0f + Top) * 0.5f);
-						P.Size = FVector(Size, Size, Top - Z - 1.0f + 0.02f);
-						P.Rotation = FRotator(0.0f, Yaw + WorldGen::HashFloat(i, j, 1736) * 40.0f, 0.0f);
-						P.bTinted = true;
-						P.Tint = C;
-						House.Pieces.Add(P);
-					}
-				}
+				const float A1 = FMath::Min(X + 60.0f, X1), B1 = FMath::Min(Y + 60.0f, Y1);
+				bool bSkip = false;
+				for (const FHole& H : Skips) bSkip |= A1 > H.X0 && X < H.X1 && B1 > H.Y0 && Y < H.Y1;
+				if (!bSkip) Box(ESurface::Carpet, X, Y, Z, A1, B1, Z + 1.0f);
 			}
 		}
 	};
@@ -788,7 +750,7 @@ FHouse GenerateFamilyHouse1719()
 	// ================= Ground floor =================
 	FloorSlab(ESurface::PlankFloor, -SlabThickness, 0.0f, { DownStair });
 	Box(ESurface::TileFloor, 55.0f, -60.0f, 0.0f, HX - 12.0f, 265.0f, 1.5f);           // kitchen
-	Box(ESurface::TileFloor, 55.0f, -300.0f, 0.0f, HX - 12.0f, -205.0f, 1.5f);         // whole bath
+	Box(ESurface::TileFloor, 55.0f, -300.0f, 0.0f, HX - 12.0f, -65.0f, 1.5f);         // whole bath
 	Exterior(true, HY, 0.0f, Wall, { { -170.0f, DoorWidth, 0.0f, DoorHeight, false }, { -330.0f, 110.0f, WinB, WinT, true }, { 290.0f, 130.0f, WinB, WinT, true } });
 	Exterior(true, -HY, 0.0f, Wall, { { -250.0f, DoorWidth, 0.0f, DoorHeight, false }, { 250.0f, 100.0f, WinB, WinT, true } });
 	Exterior(false, -HX, 0.0f, Wall, { { 400.0f, 130.0f, WinB, WinT, true }, { 110.0f, 110.0f, WinB, WinT, true }, { -180.0f, 100.0f, WinB, WinT, true } });
@@ -807,16 +769,13 @@ FHouse GenerateFamilyHouse1719()
 	for (int32 s = 0; s < 15; ++s)
 	{
 		const float Run = 360.0f / 15.0f, Rise = Storey / 15.0f;
-		{
-			const float R = WorldGen::HashFloat(s * 13 + 2, 5, 1722);
-			Tinted(ESurface::InteriorWall, R < 0.4f ? FLinearColor(0.22f, 0.13f, 0.07f) : R < 0.65f ? FLinearColor(0.45f, 0.30f, 0.17f) : FLinearColor(0.88f, 0.70f, 0.47f), -45.0f, -90.0f + s * Run, s * Rise, 45.0f, -90.0f + (s + 1) * Run + 3.0f, (s + 1) * Rise);
-		}
+		Box(ESurface::Carpet, -45.0f, -90.0f + s * Run, s * Rise, 45.0f, -90.0f + (s + 1) * Run + 3.0f, (s + 1) * Rise);
 	}
 	// Living room (west, front) with the window air conditioner; dining room (east, front).
 	Put(EFurniture::Sofa, -150.0f, 440.0f, 180.0f);
 	Put(EFurniture::ArmChair, -250.0f, 340.0f, 150.0f);
 	Put(EFurniture::ArmChair, -60.0f, 340.0f, 200.0f);
-	Carpet(-HX + 12.0f, 280.0f, HX - 12.0f, HY - 12.0f, 0.0f, {});
+	Carpet(-HX + 12.0f, -HY + 12.0f, HX - 12.0f, HY - 12.0f, 0.0f, { DownStair, FHole{ 50.0f, -300.0f, HX, 270.0f } });
 	Tinted(ESurface::Wood, Black, -HX + 14.0f, 470.0f, 0.0f, -HX + 54.0f, 520.0f, 45.0f);
 	Tinted(ESurface::Wood, Black, -HX + 20.0f, 472.0f, 45.0f, -HX + 32.0f, 518.0f, 100.0f);
 	Tinted(ESurface::Stone, FLinearColor(0.55f, 0.55f, 0.55f), -HX - 30.0f, 335.0f, WinB + 30.0f, -HX + 40.0f, 465.0f, WinB + 105.0f); // window AC, 220 V

@@ -494,6 +494,30 @@ for name, (asset, scale_cm) in SURFACES.items():
     unreal.EditorAssetLibrary.save_loaded_asset(mi)
     unreal.log(f"Created {path}")
 
+# Carpet: brown, dotted with tiny roundish spots of dark brown and tan (1-3 inch patches, irregular), from world-space noise.
+m = new_material("M_Carpet")
+m.set_editor_property("used_with_instanced_static_meshes", True)
+g = Graph(m)
+xy_a, _, _ = g.world_uvs(21.0)
+xy_b, _, _ = g.world_uvs(13.0)
+xy_c, _, _ = g.world_uvs(9.0)
+na = g.mask(g.sample(tex("T_Perlin_Noise_M"), xy_a), r=True)
+nb = g.mask(g.sample(tex("T_Perlin_Noise_M"), xy_b), r=True)
+nc = g.mask(g.sample(tex("T_Perlin_Noise_M"), xy_c), r=True)
+dark = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(na, nc), g.const(0.30)), g.const(14.0)))
+pale = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(nb, g.op(unreal.MaterialExpressionSubtract, g.const(1.0), nc)), g.const(0.26)), g.const(14.0)))
+carpet = g.lerp(g.lerp(g.color(0.13, 0.075, 0.04), g.color(0.030, 0.014, 0.006), dark), g.color(0.36, 0.24, 0.13), pale)
+lib.connect_material_property(carpet, "", MP.MP_BASE_COLOR)
+lib.connect_material_property(g.const(0.97), "", MP.MP_ROUGHNESS)
+finish(m)
+carpet_parent = m
+path = f"{FOLDER}/Building/MI_Carpet"
+if unreal.EditorAssetLibrary.does_asset_exist(path):
+    unreal.EditorAssetLibrary.delete_asset(path)
+mi = tools.create_asset("MI_Carpet", f"{FOLDER}/Building", unreal.MaterialInstanceConstant, unreal.MaterialInstanceConstantFactoryNew())
+lib.set_material_instance_parent(mi, carpet_parent)
+unreal.EditorAssetLibrary.save_loaded_asset(mi)
+
 # Window glass: see-through, slightly reflective.
 m = new_material("M_Glass")
 m.set_editor_property("used_with_instanced_static_meshes", True)

@@ -318,7 +318,7 @@ void ATerrainStreamer::BeginPlay()
 	// House surfaces: boxes with photoscanned building materials.
 	{
 		static const TCHAR* Names[] = { TEXT("ExteriorWall"), TEXT("BrickWall"), TEXT("TimberWall"), TEXT("InteriorWall"), TEXT("PlankFloor"),
-			TEXT("TileFloor"), TEXT("Stone"), TEXT("ClayRoof"), TEXT("SlateRoof"), TEXT("Wood") };
+			TEXT("TileFloor"), TEXT("Stone"), TEXT("ClayRoof"), TEXT("SlateRoof"), TEXT("Wood"), TEXT("Carpet") };
 		static_assert(UE_ARRAY_COUNT(Names) + 1 == static_cast<int32>(HouseGen::ESurface::Count), "one material per surface (plus glass)");
 		for (int32 i = 0; i < static_cast<int32>(HouseGen::ESurface::Count); ++i)
 		{

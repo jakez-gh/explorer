@@ -25,6 +25,7 @@ namespace HouseGen
 		ClayRoof,
 		SlateRoof,
 		Wood,           // frames, doors, stairs, trim
+		Carpet,         // procedural brown carpet with tiny round spots of tan and dark brown
 		Glass,
 		Count
 	};
