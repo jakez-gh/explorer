@@ -929,6 +929,36 @@ FHouse GenerateFamilyHouse1719()
 		Box(ESurface::Stone, -170.0f - 108.0f, PY + 15.0f, -60.0f, -170.0f - 100.0f, PY + 130.0f, 45.0f);
 	}
 
+	// Interior walls were each a solid colour or wood panelling, never patterned. Room by room (a best guess until
+	// confirmed): solid earth-tone paint in most rooms, panelling in the halls, baby's room and the basement bar side.
+	for (FPiece& P : House.Pieces)
+	{
+		if (P.bFurniture || P.bTinted || P.Surface != ESurface::InteriorWall || FMath::Abs(P.Center.X) > HX || P.Center.Y < -HY || P.Center.Y > HY) continue;
+		if (P.Size.Z < 100.0f || P.Size.Z > 320.0f) continue; // only wall slabs
+		const float X = P.Center.X, Y = P.Center.Y, Zc = P.Center.Z;
+		bool bPanel = false;
+		FLinearColor C(1.25f, 1.02f, 0.78f);
+		if (Zc < 0.0f)                 { bPanel = X > 0.0f && Y > 0.0f; C = FLinearColor(0.75f, 0.5f, 0.32f); }        // basement: panelled bar wall
+		else if (Zc < Storey)          // ground floor
+		{
+			if (FMath::Abs(X) < 60.0f) { bPanel = true; C = FLinearColor(0.8f, 0.55f, 0.36f); }                            // hall
+			else if (Y > 270.0f)       { C = FLinearColor(1.25f, 1.02f, 0.78f); }                                          // living room: tan
+			else if (X > 0.0f && Y > -60.0f) { C = FLinearColor(1.45f, 1.2f, 0.62f); }                                     // kitchen: harvest yellow
+			else if (X > 0.0f)         { C = FLinearColor(1.15f, 1.0f, 0.8f); }                                             // pantry and bath
+			else if (Y > -60.0f)       { C = FLinearColor(0.95f, 1.0f, 0.66f); }                                            // master: olive
+			else                       { bPanel = true; C = FLinearColor(0.78f, 0.53f, 0.34f); }                            // baby's room
+		}
+		else                           // upstairs
+		{
+			if (X < -50.0f)            { C = FLinearColor(0.85f, 0.62f, 0.4f); }                                            // boys: brown
+			else if (X > 50.0f)        { C = FLinearColor(1.3f, 1.05f, 0.8f); }                                             // girl's dormer: tan
+			else                       { bPanel = true; C = FLinearColor(0.8f, 0.55f, 0.36f); }                            // landing
+		}
+		if (bPanel) P.Surface = ESurface::Wood;
+		P.bTinted = true;
+		P.Tint = C;
+	}
+
 	// ================= Garage, parking pad, fence =================
 	{
 		const float GX = 340.0f, GY = -1600.0f, GHX = 300.0f, GHY = 320.0f;
