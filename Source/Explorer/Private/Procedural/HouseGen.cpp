@@ -859,7 +859,7 @@ FHouse GenerateFamilyHouse1719()
 	FloorSlab(ESurface::PlankFloor, -SlabThickness, 0.0f, { DownStair });
 	Box(ESurface::TileFloor, 55.0f, -60.0f, 0.0f, HX - 12.0f, 265.0f, 1.5f);           // kitchen
 	Box(ESurface::TileFloor, 55.0f, -300.0f, 0.0f, HX - 12.0f, -65.0f, 1.5f);         // whole bath
-	Exterior(true, HY, 0.0f, Wall, { { -170.0f, DoorWidth, 0.0f, DoorHeight, false }, { -330.0f, 110.0f, WinB, WinT, true }, { 290.0f, 130.0f, WinB, WinT, true } });
+	Exterior(true, HY, 0.0f, Wall, { { 0.0f, DoorWidth, 0.0f, DoorHeight, false }, { -330.0f, 110.0f, WinB, WinT, true }, { 290.0f, 130.0f, WinB, WinT, true } });
 	Exterior(true, -HY, 0.0f, Wall, { { -250.0f, DoorWidth, 0.0f, DoorHeight, false }, { 250.0f, 100.0f, WinB, WinT, true } });
 	Exterior(false, -HX, 0.0f, Wall, { { 400.0f, 130.0f, WinB, WinT, true }, { 110.0f, 110.0f, WinB, WinT, true }, { -180.0f, 100.0f, WinB, WinT, true } });
 	Exterior(false, HX, 0.0f, Wall, { { 400.0f, 120.0f, WinB, WinT, true }, { 110.0f, 100.0f, WinB, WinT, true }, { -130.0f, 60.0f, 140.0f, 210.0f, true }, { -250.0f, 60.0f, 140.0f, 210.0f, true } });
@@ -1046,8 +1046,8 @@ FHouse GenerateFamilyHouse1719()
 		Box(ESurface::Stone, PX0 - 15.0f, HY, -110.0f, PX1 + 15.0f, PY + 15.0f, -8.0f);
 		Box(ESurface::PlankFloor, PX0, HY, -8.0f, PX1, PY, 0.0f);
 		FWall Front; Front.bAlongX = true; Front.Fixed = PY; Front.From = PX0; Front.To = PX1; Front.Thickness = 14.0f; Front.bExterior = true;
-		Front.Openings.Add({ -170.0f, 100.0f, 0.0f, DoorHeight, false });
-		for (const float X : { -330.0f, -260.0f, 40.0f, 110.0f, 260.0f, 350.0f })
+		Front.Openings.Add({ 0.0f, 100.0f, 0.0f, DoorHeight, false });
+		for (const float X : { -330.0f, -260.0f, -90.0f, 90.0f, 260.0f, 330.0f })
 		{
 			Front.Openings.Add({ X, 60.0f, 95.0f, 225.0f, true });
 		}
@@ -1065,11 +1065,11 @@ FHouse GenerateFamilyHouse1719()
 		const FLinearColor Pine(1.7f, 1.35f, 0.8f);
 		for (int32 k = 0; k < 6; ++k)
 		{
-			Tinted(ESurface::Wood, Pine, -170.0f - 65.0f, PY + 15.0f + k * 26.0f, -110.0f, -170.0f + 65.0f, PY + 41.0f + k * 26.0f, -110.0f + (6 - k) * 18.0f);
+			Tinted(ESurface::Wood, Pine, -65.0f, PY + 15.0f + k * 26.0f, -110.0f, 65.0f, PY + 41.0f + k * 26.0f, -110.0f + (6 - k) * 18.0f);
 		}
 		for (const float Sx : { -1.0f, 1.0f })
 		{
-			Tinted(ESurface::Wood, Pine, -170.0f + Sx * 62.0f - 3.0f, PY + 15.0f, -20.0f, -170.0f + Sx * 62.0f + 3.0f, PY + 175.0f, 70.0f);
+			Tinted(ESurface::Wood, Pine, Sx * 62.0f - 3.0f, PY + 15.0f, -20.0f, Sx * 62.0f + 3.0f, PY + 175.0f, 70.0f);
 		}
 	}
 	// A wooden deck and steps at the back door.
@@ -1147,7 +1147,7 @@ FHouse GenerateFamilyHouse1719()
 		{
 			Post(X, FenceBack);
 			Mesh(X, FenceBack - 0.6f, FMath::Min(X + 300.0f, FenceX), FenceBack + 0.6f);
-			if (X > -330.0f && X < -30.0f) continue;
+			if (X > -150.0f && X < 150.0f) continue;
 			Post(X, FenceFront);
 			Mesh(X, FenceFront - 0.6f, FMath::Min(X + 300.0f, FenceX), FenceFront + 0.6f);
 		}

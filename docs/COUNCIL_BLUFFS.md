@@ -32,3 +32,12 @@ Story-and-a-half, blue vinyl siding, brown trim. Ground floor: central hall with
 
 ## 343 East Graham Avenue
 Public records: built 1920, ~1,539 sq ft, 2 bed / 3 bath, roof permit Dec 2024. Landmark `-StartAt="343 East Graham"` is placed on the mapped Graham Avenue East (unverified). No detailed model yet: needs the player's description or photos.
+
+## The bones of 1733 E Ave (studied from all 52 Zillow photos, 2026-09-29)
+Note: photos show it as renovated now (new floors, kitchen, paint); the shape is what matters.
+- **Type:** story-and-a-half, narrow, front-gable (ridge front-to-back), grey vinyl siding, brown fascia/gutters, tan-brown asphalt shingles. Gable end faces the street with a pair of double-hung windows.
+- **Front:** full-width enclosed porch (siding skirt, banks of windows, low roof), entry door centered on the porch, wooden steps centered, chain-link fence with a gate at the steps. Porch is a narrow room; an interior door leads into the living room.
+- **Ground floor:** living room at the front (big front window + the porch door), opening straight back into an open kitchen/dining space with a peninsula bar with pendants; a carpeted bedroom off the living room (right of the porch door); a whole bath with tub beside the kitchen; a stair going up beside the kitchen (left side) and the cellar stair beneath it.
+- **Upper floor (attic rooms):** carpeted, sloped ceilings, knee-wall closets, half-wall railing around the stair opening; a hall leads to a room with a window at the back and another at the side; a dormer-niche with a small window; a five-panel door to eave storage.
+- **Basement:** cinderblock walls, unfinished, orange-and-black checker tile floor near the stairs, small high window.
+- **Back:** double window and back door, wooden deck with stairs to the side, big tree in the yard, sheds with teal roofs, asphalt pad at the alley, chain-link fence.
