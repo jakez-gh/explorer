@@ -1074,14 +1074,17 @@ FHouse GenerateFamilyHouse1719()
 			Tinted(ESurface::Stone, Metal, -61.0f, Y - 2.0f, -60.0f, -57.0f, Y + 2.0f, 46.0f);   // posts
 		}
 	}
-	// Back steps: when the family lived here there was no deck; the steps were attached straight to the back door (x = -250).
+	// Back door: a small platform at the door with the stairs down from it, joined to the larger deck running east along the wall.
 	{
 		const FLinearColor Pine(1.7f, 1.35f, 0.8f);
-		Tinted(ESurface::Wood, Pine, -310.0f, -HY - 60.0f, -14.0f, -190.0f, -HY, 0.0f);         // landing at the door
+		Tinted(ESurface::Wood, Pine, -310.0f, -HY - 90.0f, -14.0f, -190.0f, -HY, 0.0f);            // platform at the door
+		Tinted(ESurface::Wood, Pine, -190.0f, -HY - 170.0f, -14.0f, 110.0f, -HY, 0.0f);            // the deck, level with the platform
 		for (int32 k = 0; k < 5; ++k)
 		{
-			Tinted(ESurface::Wood, Pine, -310.0f, -HY - 60.0f - (k + 1) * 26.0f, -110.0f, -190.0f, -HY - 60.0f - k * 26.0f, -110.0f + (5 - k) * 18.0f + 18.0f);
+			Tinted(ESurface::Wood, Pine, -310.0f, -HY - 90.0f - (k + 1) * 26.0f, -110.0f, -190.0f, -HY - 90.0f - k * 26.0f, -110.0f + (5 - k) * 18.0f + 18.0f);
 		}
+		Tinted(ESurface::Wood, Pine, -190.0f, -HY - 176.0f, 0.0f, 110.0f, -HY - 170.0f, 95.0f);    // deck rail, outer edge
+		Tinted(ESurface::Wood, Pine, 104.0f, -HY - 170.0f, 0.0f, 110.0f, -HY, 95.0f);              // deck rail, east end
 	}
 
 	// Interior walls were each a solid colour or wood panelling, never patterned: light blue everywhere upstairs; downstairs
