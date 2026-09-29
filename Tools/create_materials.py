@@ -498,12 +498,25 @@ for name, (asset, scale_cm) in SURFACES.items():
 m = new_material("M_Carpet")
 m.set_editor_property("used_with_instanced_static_meshes", True)
 g = Graph(m)
-xy_a, _, _ = g.world_uvs(21.0)
-xy_b, _, _ = g.world_uvs(13.0)
-xy_c, _, _ = g.world_uvs(9.0)
-na = g.mask(g.sample(tex("T_Perlin_Noise_M"), xy_a), r=True)
-nb = g.mask(g.sample(tex("T_Perlin_Noise_M"), xy_b), r=True)
-nc = g.mask(g.sample(tex("T_Perlin_Noise_M"), xy_c), r=True)
+wp = g.node(unreal.MaterialExpressionWorldPosition)
+nw = g.normal_weights()
+
+
+def carpet_noise(size_cm):
+    # Triplanar so the spots stay round on the risers and sides of the stairs, not streaks.
+    inv = g.const(1.0 / size_cm)
+    planes = [g.mul(g.mask(wp, r=True, g=True), inv), g.mul(g.mask(wp, r=True, b=True), inv), g.mul(g.mask(wp, g=True, b=True), inv)]
+    out = None
+    for uv, w in zip(planes, (nw[2], nw[1], nw[0])):
+        term = g.mul(g.mask(g.sample(tex("T_Perlin_Noise_M"), uv), r=True), w)
+        out = term if out is None else g.add(out, term)
+    return out
+
+
+# Spots 2.5-7.5 cm across (1-3 inches).
+na = carpet_noise(6.5)
+nb = carpet_noise(4.0)
+nc = carpet_noise(3.0)
 dark = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(na, nc), g.const(0.30)), g.const(14.0)))
 pale = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(nb, g.op(unreal.MaterialExpressionSubtract, g.const(1.0), nc)), g.const(0.26)), g.const(14.0)))
 carpet = g.lerp(g.lerp(g.color(0.13, 0.075, 0.04), g.color(0.030, 0.014, 0.006), dark), g.color(0.36, 0.24, 0.13), pale)
