@@ -571,7 +571,7 @@ FHouse GenerateFamilyHouse1719()
 {
 	// 1719 Avenue E, Council Bluffs, as the family remembers it: a story-and-a-half with blue vinyl siding and brown trim,
 	// concrete front steps, an enclosed front porch, a blue-and-brown garage on an asphalt pad, a chain-link fence, one tree
-	// out back and a full cinderblock basement. Ground floor: living and dining rooms, kitchen with a pantry and a whole
+	// out back and a full cinderblock basement. Ground floor: a living room across the front (no dining room; the family ate at a four-top in the kitchen), kitchen with a pantry and a whole
 	// bath beside it, the master bedroom, and the baby's room (once a den), all round a central hall with the stairs.
 	// Upstairs: the boys' room open to the landing and the girl's room in the dormer. Basement: the teen's bedroom, the
 	// laundry, black-and-orange tile and a bar. A 220 V window air conditioner sits in the living room; interiors are earth
@@ -764,16 +764,19 @@ FHouse GenerateFamilyHouse1719()
 	Tinted(ESurface::Wood, Black, -HX + 20.0f, 472.0f, 45.0f, -HX + 32.0f, 518.0f, 100.0f);
 	Tinted(ESurface::Stone, FLinearColor(0.55f, 0.55f, 0.55f), -HX - 30.0f, 335.0f, WinB + 30.0f, -HX + 40.0f, 465.0f, WinB + 105.0f); // window AC, 220 V
 	Box(ESurface::Wood, -HX + 12.0f, 470.0f, 25.0f, -HX + 22.0f, 480.0f, 55.0f);
-	Put(EFurniture::DiningTable, 250.0f, 400.0f, 0.0f);
-	for (const float X : { 190.0f, 250.0f, 310.0f })
-	{
-		Put(EFurniture::DiningChair, X, 330.0f, -90.0f);
-		Put(EFurniture::DiningChair, X, 470.0f, 90.0f);
-	}
+	// No dining room: the east half of the front room is more living room, and the family ate at a four-top in the kitchen.
+	Put(EFurniture::Sofa, 250.0f, 480.0f, 180.0f);
+	Put(EFurniture::CoffeeTable, 250.0f, 400.0f, 0.0f);
+	Put(EFurniture::ArmChair, 380.0f, 400.0f, 180.0f);
 	Put(EFurniture::Cupboard, 400.0f, 300.0f, 180.0f);
 	Put(EFurniture::CeilingLamp, -180.0f, 400.0f, 0.0f, Wall - 45.0f);
 	Put(EFurniture::CeilingLamp, 250.0f, 400.0f, 0.0f, Wall - 45.0f);
 	// Kitchen, pantry, whole bath.
+	Put(EFurniture::DiningTable, 220.0f, 130.0f, 0.0f);   // the kitchen four-top
+	Put(EFurniture::DiningChair, 220.0f, 70.0f, 90.0f);
+	Put(EFurniture::DiningChair, 220.0f, 190.0f, -90.0f);
+	Put(EFurniture::DiningChair, 170.0f, 130.0f, 0.0f);
+	Put(EFurniture::DiningChair, 270.0f, 130.0f, 180.0f);
 	Put(EFurniture::Stove, 420.0f, 110.0f, 180.0f);
 	Put(EFurniture::KitchenCabinet, 220.0f, -30.0f, 90.0f);
 	Put(EFurniture::KitchenCabinet, 320.0f, -30.0f, 90.0f);
