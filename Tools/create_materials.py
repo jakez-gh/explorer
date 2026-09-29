@@ -520,8 +520,35 @@ nc = carpet_noise(3.0)
 dark = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(na, nc), g.const(0.30)), g.const(14.0)))
 pale = g.saturate(g.mul(g.op(unreal.MaterialExpressionSubtract, g.mul(nb, g.op(unreal.MaterialExpressionSubtract, g.const(1.0), nc)), g.const(0.26)), g.const(14.0)))
 carpet = g.lerp(g.lerp(g.color(0.13, 0.075, 0.04), g.color(0.030, 0.014, 0.006), dark), g.color(0.36, 0.24, 0.13), pale)
+# Fibre detail from the ambientCG Carpet016 scan (Tools/import_carpet.py), tinted by the spot colours above.
+fibre_d = unreal.load_asset("/Game/PolyHaven/Textures/carpet_016/carpet_016_diff")
+fibre_n = unreal.load_asset("/Game/PolyHaven/Textures/carpet_016/carpet_016_nor")
+fibre_r = unreal.load_asset("/Game/PolyHaven/Textures/carpet_016/carpet_016_rough")
+
+
+def carpet_tri(texture, size_cm, normal=False):
+    inv = g.const(1.0 / size_cm)
+    planes = [g.mul(g.mask(wp, r=True, g=True), inv), g.mul(g.mask(wp, r=True, b=True), inv), g.mul(g.mask(wp, g=True, b=True), inv)]
+    out = None
+    for uv, w in zip(planes, (nw[2], nw[1], nw[0])):
+        n = g.node(unreal.MaterialExpressionTextureSample)
+        n.set_editor_property("texture", texture)
+        if normal:
+            n.set_editor_property("sampler_type", unreal.MaterialSamplerType.SAMPLERTYPE_NORMAL)
+        g.link(uv, n, "UVs")
+        term = g.mul(n, w)
+        out = term if out is None else g.add(out, term)
+    return out
+
+
+if fibre_d:
+    pile = carpet_tri(fibre_d, 60.0)
+    carpet = g.mul(carpet, g.mul(pile, g.const(1.7)))
+    lib.connect_material_property(carpet_tri(fibre_n, 60.0, normal=True), "", MP.MP_NORMAL)
+    lib.connect_material_property(g.mask(carpet_tri(fibre_r, 60.0), r=True), "", MP.MP_ROUGHNESS)
+else:
+    lib.connect_material_property(g.const(0.97), "", MP.MP_ROUGHNESS)
 lib.connect_material_property(carpet, "", MP.MP_BASE_COLOR)
-lib.connect_material_property(g.const(0.97), "", MP.MP_ROUGHNESS)
 finish(m)
 carpet_parent = m
 path = f"{FOLDER}/Building/MI_Carpet"
