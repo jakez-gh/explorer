@@ -1030,7 +1030,6 @@ FHouse GenerateFamilyHouse1719()
 			Lining.Tint = FLinearColor(0.72f, 0.9f, 1.35f);
 			House.Pieces.Add(Lining);
 		}
-		Box(ESurface::BrickWall, 120.0f, -140.0f, Top, 180.0f, -70.0f, Top + 300.0f); // chimney
 	}
 	// Gable-end windows: a pair side by side in the front gable, a small one at the back (drawn just outside the gable siding).
 	for (const float X : { -42.0f, 42.0f })
@@ -1067,10 +1066,19 @@ FHouse GenerateFamilyHouse1719()
 		{
 			Box(ESurface::Stone, -65.0f, PY + 15.0f + k * 35.0f, -110.0f, 65.0f, PY + 50.0f + k * 35.0f, -110.0f + (4 - k) * 25.0f);
 		}
+		// Poured-concrete steps (formed, with a solid slab either side) and a painted-metal pipe rail on the left.
+		const FLinearColor Metal(0.32f, 0.33f, 0.34f);
+		Box(ESurface::Stone, -65.0f, PY + 15.0f, -110.0f, 65.0f, PY + 15.0f + 140.0f, -110.0f + 4.0f);
 		for (const float Sx : { -1.0f, 1.0f })
 		{
-			Box(ESurface::Stone, Sx * 62.0f - 6.0f, PY + 15.0f, -110.0f, Sx * 62.0f + 6.0f, PY + 155.0f, -10.0f);
+			Box(ESurface::Stone, Sx * 62.0f - 6.0f, PY + 15.0f, -110.0f, Sx * 62.0f + 6.0f, PY + 155.0f, -50.0f);
 		}
+		Tinted(ESurface::Stone, Metal, -60.0f, PY + 15.0f, 40.0f, -56.0f, PY + 160.0f, 46.0f);   // rail top
+		for (const float Y : { PY + 15.0f, PY + 85.0f, PY + 155.0f })
+		{
+			Tinted(ESurface::Stone, Metal, -61.0f, Y - 2.0f, -60.0f, -57.0f, Y + 2.0f, 46.0f);   // posts
+		}
+	}
 	}
 	// A wooden deck and steps at the back door.
 	{

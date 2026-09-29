@@ -43,3 +43,5 @@ Note: photos show it as renovated now (new floors, kitchen, paint); the shape is
 - **Back:** double window and back door, wooden deck with stairs to the side, big tree in the yard, sheds with teal roofs, asphalt pad at the alley, chain-link fence.
 
 Corrections from the family: the front step was concrete (the photos show newer wood; not what they remember), and the interior stairs did not move, so the central-stairs layout stands over the photos' kitchen-side stair.
+
+More corrections: front steps were poured concrete from a form with a metal rail; no brick is visible anywhere on the house (basement walls are cinderblock) so the chimney is removed; the stairs belong where the photos show them, beside the kitchen (the current stair in the hall west of the kitchen is the closest; its exact run is unverified).
