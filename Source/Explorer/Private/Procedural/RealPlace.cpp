@@ -56,6 +56,7 @@ namespace
 		int32 RasterW = 0, RasterH = 0;
 		TArray<uint8> Raster;
 		TArray<RealPlace::FLandmark> Landmarks;
+		TArray<TPair<TArray<FVector2D>, FString>> SchoolAreas;
 	};
 
 	FData Place;
@@ -260,6 +261,10 @@ namespace RealPlace
 					for (const FVector2D& P : A.Poly) C += P;
 					Place.Landmarks.Add({ A.Name, C / A.Poly.Num() });
 				}
+				if (Kind == TEXT("school"))
+				{
+					Place.SchoolAreas.Add({ A.Poly, A.Name });
+				}
 				if (Cover != 255)
 				{
 					Areas.Add(MoveTemp(A));
@@ -307,6 +312,29 @@ namespace RealPlace
 			B.Type = O->GetStringField(TEXT("t"));
 			B.Name = O->GetStringField(TEXT("n"));
 			B.Address = O->GetStringField(TEXT("a"));
+			// A building standing inside a school's grounds is a school building (the mapped campus of the school it belongs to).
+			if (B.Type != TEXT("school") && B.Outline.Num() > 0)
+			{
+				FVector2D C = FVector2D::ZeroVector;
+				for (const FVector2D& P : B.Outline) C += P;
+				C /= B.Outline.Num();
+				for (const TPair<TArray<FVector2D>, FString>& SA : Place.SchoolAreas)
+				{
+					bool bIn = false;
+					for (int32 i = 0, j = SA.Key.Num() - 1; i < SA.Key.Num(); j = i++)
+					{
+						const FVector2D& A = SA.Key[i];
+						const FVector2D& D = SA.Key[j];
+						if (((A.X > C.X) != (D.X > C.X)) && (C.Y < (D.Y - A.Y) * (C.X - A.X) / (D.X - A.X) + A.Y)) bIn = !bIn;
+					}
+					if (bIn)
+					{
+						B.Type = TEXT("school");
+						if (B.Name.IsEmpty()) B.Name = SA.Value;
+						break;
+					}
+				}
+			}
 			FillPolygon(B.Outline, [](uint8& Cell) { Cell |= CoverBuilding; });
 			if (!B.Name.IsEmpty())
 			{

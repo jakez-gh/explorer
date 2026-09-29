@@ -2467,10 +2467,13 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 		{
 			Floors = 2;
 		}
-		const HouseGen::EStyle Style = (Seed & 3) == 0 ? HouseGen::EStyle::Brick : HouseGen::EStyle::Plaster;
+		const bool bSchoolBuilding = B->Type == TEXT("school");
+		const bool bDowntown = B->Type == TEXT("retail") || B->Type == TEXT("commercial") || B->Type == TEXT("office");
+		const HouseGen::EStyle Style = (bSchoolBuilding || bDowntown || (Seed & 3) == 0) ? HouseGen::EStyle::Brick : HouseGen::EStyle::Plaster;
 		const FQuat Quat = FRotator(0.0f, Yaw, 0.0f).Quaternion();
 		const FVector Base(Centre2.X, Centre2.Y, High + 40.0f);
-		const bool bDetailed = W * D <= 1.2e7f;
+		// Big civic and commercial buildings (schools, downtown blocks) are built in detail too, up to 6,000 m2; from a distance only their shells.
+		const bool bDetailed = W * D <= (bBig ? 6.0e7f : 1.2e7f);
 		if (Level >= EProps::Shell && (bDetailed || bChurch))
 		{
 			const HouseGen::FHouse Plan = bChurch ? HouseGen::GenerateChurch(Seed, Style)
