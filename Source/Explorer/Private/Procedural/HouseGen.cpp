@@ -1061,11 +1061,6 @@ FHouse GenerateFamilyHouse1719()
 		Roof.Size = FVector(PX1 - PX0 + 70.0f, 290.0f, 10.0f);
 		Roof.Rotation = FRotator(0.0f, 0.0f, 10.0f);
 		House.Pieces.Add(Roof);
-		// Concrete front steps (as the family remembers them), with low concrete cheek walls.
-		for (int32 k = 0; k < 4; ++k)
-		{
-			Box(ESurface::Stone, -65.0f, PY + 15.0f + k * 35.0f, -110.0f, 65.0f, PY + 50.0f + k * 35.0f, -110.0f + (4 - k) * 25.0f);
-		}
 		// Poured-concrete steps (formed, with a solid slab either side) and a painted-metal pipe rail on the left.
 		const FLinearColor Metal(0.32f, 0.33f, 0.34f);
 		Box(ESurface::Stone, -65.0f, PY + 15.0f, -110.0f, 65.0f, PY + 15.0f + 140.0f, -110.0f + 4.0f);
@@ -1079,18 +1074,19 @@ FHouse GenerateFamilyHouse1719()
 			Tinted(ESurface::Stone, Metal, -61.0f, Y - 2.0f, -60.0f, -57.0f, Y + 2.0f, 46.0f);   // posts
 		}
 	}
-	}
-	// A wooden deck and steps at the back door.
+	// The back deck spans from just past the back door to the east; its steps run down the far end, away from the door.
 	{
 		const FLinearColor Pine(1.7f, 1.35f, 0.8f);
-		Tinted(ESurface::Wood, Pine, -340.0f, -HY - 170.0f, -14.0f, -140.0f, -HY, 0.0f);
+		const float DX0 = -80.0f, DX1 = 260.0f, DY1 = -HY, DY0 = -HY - 170.0f;
+		Tinted(ESurface::Wood, Pine, DX0, DY0, -14.0f, DX1, DY1, 0.0f);
 		for (int32 k = 0; k < 6; ++k)
 		{
-			Tinted(ESurface::Wood, Pine, -300.0f, -HY - 170.0f - (k + 1) * 26.0f, -110.0f, -180.0f, -HY - 170.0f - k * 26.0f, -110.0f + (6 - k) * 18.0f);
+			Tinted(ESurface::Wood, Pine, DX1 + k * 26.0f, DY0 + 20.0f, -110.0f, DX1 + (k + 1) * 26.0f, DY1 - 20.0f, -110.0f + (6 - k) * 18.0f);
 		}
-		Tinted(ESurface::Wood, Pine, -342.0f, -HY - 170.0f, 0.0f, -336.0f, -HY, 95.0f);
-		Tinted(ESurface::Wood, Pine, -144.0f, -HY - 170.0f, 0.0f, -138.0f, -HY, 95.0f);
-		Tinted(ESurface::Wood, Pine, -342.0f, -HY - 176.0f, 0.0f, -138.0f, -HY - 170.0f, 95.0f);
+		Tinted(ESurface::Wood, Pine, DX0, DY0 - 6.0f, 0.0f, DX1, DY0, 95.0f);                   // rail along the outer edge
+		Tinted(ESurface::Wood, Pine, DX1 - 6.0f, DY0, 0.0f, DX1, DY0 + 20.0f, 95.0f);
+		Tinted(ESurface::Wood, Pine, DX1 - 6.0f, DY1 - 20.0f, 0.0f, DX1, DY1, 95.0f);
+		Tinted(ESurface::Wood, Pine, DX0 - 6.0f, DY0, 0.0f, DX0, DY1, 95.0f);
 	}
 
 	// Interior walls were each a solid colour or wood panelling, never patterned: light blue everywhere upstairs; downstairs
