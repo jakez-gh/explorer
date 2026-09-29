@@ -1116,12 +1116,12 @@ FHouse GenerateFamilyHouse1719()
 		if (Zc < 0.0f)                 { bPanel = X > 0.0f && Y > 0.0f; C = FLinearColor(0.75f, 0.5f, 0.32f); }        // basement: panelled bar wall
 		else if (Zc < Storey)          // ground floor
 		{
-			if (FMath::Abs(X) < 60.0f) { bPanel = true; C = FLinearColor(0.8f, 0.55f, 0.36f); }                            // hall
+			if (FMath::Abs(X) < 60.0f) { bPanel = true; C = FLinearColor(0.5f, 0.34f, 0.22f); }                            // hall (darker panelling)
 			else if (Y > 270.0f)       { C = FLinearColor(1.25f, 1.02f, 0.78f); }                                          // living room: tan
 			else if (X > 0.0f && Y > -60.0f) { C = FLinearColor(1.45f, 1.2f, 0.62f); }                                     // kitchen: harvest yellow
 			else if (X > 0.0f)         { C = FLinearColor(1.15f, 1.0f, 0.8f); }                                             // pantry and bath
 			else if (Y > -60.0f)       { C = FLinearColor(0.95f, 1.0f, 0.66f); }                                            // master: olive
-			else                       { bPanel = true; C = FLinearColor(0.78f, 0.53f, 0.34f); }                            // baby's room
+			else                       { bPanel = true; C = FLinearColor(0.5f, 0.34f, 0.22f); }                            // baby's room
 		}
 		else                           // upstairs
 		{
