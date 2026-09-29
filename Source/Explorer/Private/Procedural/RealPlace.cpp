@@ -248,6 +248,8 @@ namespace RealPlace
 			else if (Kind == TEXT("park") || Kind == TEXT("recreation_ground") || Kind == TEXT("golf_course") || Kind == TEXT("pitch") || Kind == TEXT("grass") || Kind == TEXT("meadow") || Kind == TEXT("playground") || Kind == TEXT("track") || Kind == TEXT("stadium")) Cover = CoverPark;
 			else if (Kind == TEXT("forest") || Kind == TEXT("wood")) Cover = CoverWood;
 			else if (Kind == TEXT("cemetery")) Cover = CoverCemetery;
+			// Big Lake Park and the shore around it were thick woods (motorcycle trails, camping): treat the whole park as forest.
+			if (Kind == TEXT("park") && O->GetStringField(TEXT("n")).Contains(TEXT("Big Lake"))) Cover = CoverWood;
 			FArea A;
 			A.Cover = Cover;
 			A.Name = O->GetStringField(TEXT("n"));
@@ -399,15 +401,15 @@ namespace RealPlace
 						continue;
 					}
 					const FVector2D T = (B - A) / Len;
-					for (double S = Carry; S < Len; S += 1500.0)
+					for (double S = Carry; S < Len; S += 1300.0)
 					{
 						const FVector2D P = A + T * S;
 						for (const int32 Side : { -1, 1 })
 						{
 							const FVector2D N = FVector2D(-T.Y, T.X) * Side;
 							const uint32 Seed = static_cast<uint32>(FMath::RoundToInt(P.X / 50.0) * 73856093) ^ static_cast<uint32>(FMath::RoundToInt(P.Y / 50.0) * 19349663) ^ static_cast<uint32>(Side + 3);
-							const float RW = 900.0f + (Seed % 300), RD = 800.0f + ((Seed >> 8) % 200);
-							const FVector2D C = P + N * (Way.Width * 0.5 + 300.0 + RD * 0.5 + 900.0);
+							const float RW = 800.0f + (Seed % 220), RD = 800.0f + ((Seed >> 8) % 250);
+							const FVector2D C = P + N * (Way.Width * 0.5 + 250.0 + RD * 0.5 + 450.0);
 							// Corners must sit on residential land, clear of buildings and water.
 							bool bOk = true;
 							for (const FVector2D& Off : { FVector2D(0, 0), FVector2D(RW * 0.5, RD * 0.5), FVector2D(-RW * 0.5, RD * 0.5), FVector2D(RW * 0.5, -RD * 0.5), FVector2D(-RW * 0.5, -RD * 0.5) })
@@ -456,7 +458,7 @@ namespace RealPlace
 									const TArray<int32>* Bucket = Place.LotGrid.Find(FIntPoint(BX, BY));
 									for (int32 k = 0; Bucket && bOk && k < Bucket->Num(); ++k)
 									{
-										bOk = FVector2D::Distance(C, Place.Lots[(*Bucket)[k]].Pos) > 1150.0;
+										bOk = FVector2D::Distance(C, Place.Lots[(*Bucket)[k]].Pos) > 1050.0;
 									}
 								}
 							}
@@ -479,8 +481,8 @@ namespace RealPlace
 							}
 						}
 					}
-					Carry = FMath::Fmod(Carry + 1500.0 - Len, 1500.0);
-					if (Carry < 0.0) Carry += 1500.0;
+					Carry = FMath::Fmod(Carry + 1300.0 - Len, 1300.0);
+					if (Carry < 0.0) Carry += 1300.0;
 				}
 			}
 			// 1733 Avenue E: 17th Street is 1,456 m west of Bayliss Park, 18th 124 m further west; house

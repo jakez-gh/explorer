@@ -45,3 +45,9 @@ Note: photos show it as renovated now (new floors, kitchen, paint); the shape is
 Corrections from the family: the front step was concrete (the photos show newer wood; not what they remember), and the interior stairs did not move, so the central-stairs layout stands over the photos' kitchen-side stair.
 
 More corrections: front steps were poured concrete from a form with a metal rail; no brick is visible anywhere on the house (basement walls are cinderblock) so the chimney is removed; the stairs belong where the photos show them, beside the kitchen (the current stair in the hall west of the kitchen is the closest; its exact run is unverified).
+
+## Status (2026-09-29) and open questions for the family
+Done: real terrain/streets/buildings; schools (Abraham Lincoln HS, Thomas Jefferson HS, Wilson Junior High, Roosevelt, Washington...) and downtown commercial blocks built as brick flat-roofed buildings with window bands (interiors only within one chunk of the viewer); Big Lake Park is forest; infill house lots follow the satellite view (about 13 m lot pitch, 4.5 m setback; ~60,000 lots); the family house from Zillow photos + memory.
+Checked against satellite/Street View: house widths (8-10 m) and spacing are close; neighbouring houses are mostly cream/white/tan siding with dark roofs, matching the generated palette.
+Open questions (need the family): exact interior colours per room; where the interior stairs really ran (photos: beside the kitchen; memory: centre); carpet look; what the 1978-88 school buildings looked like (OSM is today's campus); Big Lake trails/campsites (no trail data was in OSM inside the park).
+Tools: `-StartDist`, `-StartSide`, `-StartAlt`, `-StartAt="<name>"`, `-NoRoof`, `-HouseReport`, `-BiomeReport`; `Tools/fetch_council_bluffs.py`, `Tools/import_carpet.py`.

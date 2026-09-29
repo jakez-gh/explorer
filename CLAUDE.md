@@ -38,6 +38,7 @@
 ## Real place: Council Bluffs, Iowa
 - `Procedural/RealPlace` loads `Data/CouncilBluffs.json` (OSM + DEM, baked by `Tools/fetch_council_bluffs.py`) and overrides `WorldGen::Sample`/`PathsNear` around world (X=2,500,000, Y=1,500,000): real terrain, lakes, woods, streets; `TerrainStreamer::AddRealBuildings` builds every mapped building from its footprint with `HouseGen` (furnished interiors near, solid blocks far). See `docs/COUNCIL_BLUFFS.md`.
 - `-CouncilBluffs` / `-StartAt="<landmark substring>"` (e.g. "Big Lake Park", "Thomas Jefferson", "1733 Avenue E") start over it. `-NoRoof` debug flag removes house roofs.
+- Camera flags for comparison shots: `-StartDist=` `-StartSide=` `-StartAlt=`; `-NoRoof`. Family house: `HouseGen::GenerateFamilyHouse1719` (Zillow photos of 1733 E Ave + the family's memory).
 - Also new: `HouseGen::GenerateChurch`, discoveries (ruins, obelisks, World Tree, sky gates, wind farms), furniture registry sync-scan fix.
 
 ## Controls
