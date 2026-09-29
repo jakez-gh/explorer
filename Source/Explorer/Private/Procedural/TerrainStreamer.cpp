@@ -1233,6 +1233,11 @@ void ATerrainStreamer::ComputeGrassTile(const FIntPoint& Tile, TArray<FTransform
 				continue;
 			}
 
+			if (RealPlace::Occupied(P))
+			{
+				continue; // no grass through a real building or house lot
+			}
+
 			const float Slope = FMath::Max(FMath::Abs(BR.Height - BL.Height), FMath::Abs(TL.Height - BL.Height)) / GridSpacing;
 			const FWorldSample& S = BL;
 			const float Grassy = (1.0f - S.Sand) * (1.0f - FMath::Max(S.Rock, Smooth(0.5f, 0.9f, Slope))) * (1.0f - S.Snow) * (1.0f - 0.55f * S.Forest);
@@ -2472,6 +2477,58 @@ void ATerrainStreamer::AddRealBuildings(const FIntPoint& Coord, FPropBatch& Batc
 		if (Level == EProps::Full)
 		{
 			const HouseGen::FHouse Plan = Lot->bFamilyHouse ? HouseGen::GenerateFamilyHouse1719() : HouseGen::Generate(Lot->Seed, Style, Floors > 1, W, D, false, Floors);
+			if (Lot->bFamilyHouse)
+			{
+				// Log each furniture model's footprint, and any pieces of furniture whose footprints overlap on the same floor.
+				struct FFoot { int32 Type; FVector2D C; double Yaw; FVector2D Half; double Z; };
+				TArray<FFoot> Feet;
+				for (const HouseGen::FPiece& Piece : Plan.Pieces)
+				{
+					if (!Piece.bFurniture) continue;
+					const FBox& Bx = PartBounds[Furniture0 + static_cast<int32>(Piece.Furniture)];
+					const FVector Size = Bx.GetSize();
+					Feet.Add({ static_cast<int32>(Piece.Furniture), FVector2D(Piece.Center.X, Piece.Center.Y), Piece.Rotation.Yaw, FVector2D(Size.X, Size.Y) * 0.5f, Piece.Center.Z });
+				}
+				static bool bSizesLogged = false;
+				if (!bSizesLogged)
+				{
+					bSizesLogged = true;
+					for (int32 t = 0; t < static_cast<int32>(HouseGen::EFurniture::Count); ++t)
+					{
+						const FVector Size = PartBounds[Furniture0 + t].GetSize();
+						UE_LOG(LogTemp, Display, TEXT("FurnitureSize type=%d %.0f x %.0f x %.0f cm"), t, Size.X, Size.Y, Size.Z);
+					}
+				}
+				auto Corners = [](const FFoot& F, FVector2D Out[4])
+				{
+					const float C = FMath::Cos(FMath::DegreesToRadians(F.Yaw)), Sn = FMath::Sin(FMath::DegreesToRadians(F.Yaw));
+					const FVector2D Ax(C, Sn), Ay(-Sn, C);
+					Out[0] = F.C + Ax * F.Half.X + Ay * F.Half.Y; Out[1] = F.C - Ax * F.Half.X + Ay * F.Half.Y;
+					Out[2] = F.C - Ax * F.Half.X - Ay * F.Half.Y; Out[3] = F.C + Ax * F.Half.X - Ay * F.Half.Y;
+				};
+				auto Overlap = [&](const FFoot& A, const FFoot& B)
+				{
+					FVector2D PA[4], PB[4];
+					Corners(A, PA); Corners(B, PB);
+					const FVector2D Axes[4] = { PA[0] - PA[1], PA[0] - PA[3], PB[0] - PB[1], PB[0] - PB[3] };
+					for (const FVector2D& Ax0 : Axes)
+					{
+						const FVector2D Ax = Ax0.GetSafeNormal();
+						float MinA = 1e9f, MaxA = -1e9f, MinB = 1e9f, MaxB = -1e9f;
+						for (int32 k = 0; k < 4; ++k)
+						{
+							const float DA = FVector2D::DotProduct(PA[k], Ax), DB = FVector2D::DotProduct(PB[k], Ax);
+							MinA = FMath::Min(MinA, DA); MaxA = FMath::Max(MaxA, DA); MinB = FMath::Min(MinB, DB); MaxB = FMath::Max(MaxB, DB);
+						}
+						if (MaxA < MinB + 2.0f || MaxB < MinA + 2.0f) return false;
+					}
+					return true;
+				};
+				for (int32 i = 0; i < Feet.Num(); ++i)
+					for (int32 j = i + 1; j < Feet.Num(); ++j)
+						if (FMath::Abs(Feet[i].Z - Feet[j].Z) < 150.0f && Overlap(Feet[i], Feet[j]))
+							UE_LOG(LogTemp, Display, TEXT("FurnitureOverlap types %d and %d at (%.0f,%.0f) and (%.0f,%.0f) z=%.0f"), Feet[i].Type, Feet[j].Type, Feet[i].C.X, Feet[i].C.Y, Feet[j].C.X, Feet[j].C.Y, Feet[i].Z);
+			}
 			for (const HouseGen::FPiece& Piece : Plan.Pieces)
 			{
 				const FVector World = Base + Quat.RotateVector(Piece.Center);

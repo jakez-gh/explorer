@@ -42,6 +42,9 @@ namespace RealPlace
 	struct FLot { FVector2D Pos; float Yaw; float Width; float Depth; uint32 Seed; bool bFamilyHouse = false; };
 	void LotsIn(const FVector2D& Min, const FVector2D& Max, TArray<const FLot*>& Out);
 
+	// True if P is inside (or right beside) a building or house lot: no grass, no trees there.
+	bool Occupied(const FVector2D& P);
+
 	// Named landmarks (schools, parks...) in world units, for reports and starting positions.
 	struct FLandmark { FString Name; FVector2D Pos; };
 	const TArray<FLandmark>& Landmarks();

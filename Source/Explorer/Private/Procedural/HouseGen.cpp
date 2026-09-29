@@ -736,7 +736,7 @@ FHouse GenerateFamilyHouse1719()
 	}
 	for (int32 k = 0; k < 4; ++k) Box(ESurface::Wood, 180.0f, 95.0f + k * 85.0f, BZ, 215.0f, 130.0f + k * 85.0f, BZ + 72.0f);
 	Put(EFurniture::Sofa, -330.0f, 250.0f, 0.0f, BZ);
-	Put(EFurniture::CoffeeTable, -190.0f, 250.0f, 0.0f, BZ);
+	Put(EFurniture::CoffeeTable, -140.0f, 250.0f, 0.0f, BZ);
 	Put(EFurniture::ArmChair, -160.0f, 420.0f, 200.0f, BZ);
 	Tinted(ESurface::Wood, Black, -HX + 14.0f, 380.0f, BZ, -HX + 60.0f, 460.0f, BZ + 45.0f);
 	Tinted(ESurface::Wood, Black, -HX + 20.0f, 385.0f, BZ + 45.0f, -HX + 32.0f, 455.0f, BZ + 100.0f);
@@ -756,7 +756,10 @@ FHouse GenerateFamilyHouse1719()
 	Interior(false, -50.0f, -528.0f, 270.0f, 0.0f, Wall, { 150.0f, -180.0f, -420.0f });
 	Interior(false, 50.0f, -528.0f, 270.0f, 0.0f, Wall, { 150.0f, -250.0f, -420.0f });
 	Interior(true, 270.0f, -HX + 11.0f, -50.0f, 0.0f, Wall, {});                        // master bedroom's front wall (living beyond)
-	Interior(true, 270.0f, 50.0f, HX - 11.0f, 0.0f, Wall, { 300.0f });                   // kitchen / dining
+	Interior(true, 270.0f, 50.0f, 150.0f, 0.0f, Wall, {});                              // kitchen / family room, then the bar
+	Box(ESurface::Wood, 150.0f, 250.0f, 0.0f, HX - 12.0f, 290.0f, 100.0f);             // breakfast bar counter base
+	Box(ESurface::Wood, 150.0f, 245.0f, 100.0f, HX - 12.0f, 305.0f, 106.0f);           // its top, overhanging the family-room side
+	for (const float X : { 195.0f, 270.0f, 345.0f }) Box(ESurface::Wood, X - 18.0f, 328.0f, 0.0f, X + 18.0f, 364.0f, 68.0f);   // stools
 	Interior(true, -60.0f, -HX + 11.0f, -50.0f, 0.0f, Wall, { -250.0f });                // master / baby's room
 	Interior(true, -300.0f, -HX + 11.0f, -50.0f, 0.0f, Wall, {});                        // baby's room / back entry
 	Interior(true, -60.0f, 50.0f, HX - 11.0f, 0.0f, Wall, { 200.0f });                   // kitchen / pantry
@@ -770,27 +773,37 @@ FHouse GenerateFamilyHouse1719()
 	}
 	// Living room (west, front) with the window air conditioner; dining room (east, front).
 	Put(EFurniture::Sofa, -150.0f, 440.0f, 180.0f);
-	Put(EFurniture::ArmChair, -250.0f, 340.0f, 150.0f);
+	Put(EFurniture::ArmChair, -300.0f, 330.0f, 150.0f);
 	Put(EFurniture::ArmChair, -60.0f, 340.0f, 200.0f);
 	Carpet(-HX + 12.0f, -HY + 12.0f, HX - 12.0f, HY - 12.0f, 0.0f, { DownStair, FHole{ 50.0f, -300.0f, HX, 270.0f } });
 	Tinted(ESurface::Wood, Black, -HX + 14.0f, 470.0f, 0.0f, -HX + 54.0f, 520.0f, 45.0f);
 	Tinted(ESurface::Wood, Black, -HX + 20.0f, 472.0f, 45.0f, -HX + 32.0f, 518.0f, 100.0f);
-	Tinted(ESurface::Stone, FLinearColor(0.55f, 0.55f, 0.55f), -HX - 30.0f, 335.0f, WinB + 30.0f, -HX + 40.0f, 465.0f, WinB + 105.0f); // window AC, 220 V
+	Tinted(ESurface::InteriorWall, FLinearColor(1.2f, 1.2f, 1.15f), -HX - 30.0f, 335.0f, WinB + 30.0f, -HX + 40.0f, 465.0f, WinB + 105.0f); // window AC, 220 V
 	Box(ESurface::Wood, -HX + 12.0f, 470.0f, 25.0f, -HX + 22.0f, 480.0f, 55.0f);
 	// No dining room: the family ate at a four-top in the kitchen, and the front room is one living room.
-	Put(EFurniture::Cupboard, 400.0f, 300.0f, 180.0f);
+	// Lived-in: end tables and lamps, toys, shoes by the door, a laundry basket, a stack of mail and books.
+	Box(ESurface::Wood, -60.0f, 450.0f, 0.0f, -20.0f, 490.0f, 52.0f);
+	Box(ESurface::Wood, -300.0f, 300.0f, 0.0f, -260.0f, 340.0f, 52.0f);
+	Box(ESurface::Wood, -55.0f, 455.0f, 52.0f, -25.0f, 485.0f, 100.0f);
+	Box(ESurface::Wood, -170.0f, 285.0f, 0.0f, -120.0f, 315.0f, 6.0f);    // toys on the floor
+	Box(ESurface::Stone, -110.0f, 315.0f, 0.0f, -85.0f, 340.0f, 20.0f);
+	Box(ESurface::Wood, 60.0f, 330.0f, 0.0f, 100.0f, 350.0f, 6.0f);        // a pair of shoes
+	Box(ESurface::Wood, 280.0f, 450.0f, 0.0f, 340.0f, 500.0f, 35.0f);      // laundry basket
+	Box(ESurface::Wood, 60.0f, 500.0f, 0.0f, 120.0f, 520.0f, 120.0f);      // coat hooks and coats by the front door
 	Put(EFurniture::CeilingLamp, -180.0f, 400.0f, 0.0f, Wall - 45.0f);
 	Put(EFurniture::CeilingLamp, 250.0f, 400.0f, 0.0f, Wall - 45.0f);
 	// Kitchen, pantry, whole bath.
-	Put(EFurniture::DiningTable, 220.0f, 130.0f, 0.0f);   // the kitchen four-top
-	Put(EFurniture::DiningChair, 220.0f, 70.0f, 90.0f);
-	Put(EFurniture::DiningChair, 220.0f, 190.0f, -90.0f);
-	Put(EFurniture::DiningChair, 170.0f, 130.0f, 0.0f);
-	Put(EFurniture::DiningChair, 270.0f, 130.0f, 180.0f);
+	// The kitchen four-top: a 90 cm square table (boxes) with four chairs pulled up, clear of the doorway and cabinets.
+	Box(ESurface::Wood, 175.0f, 85.0f, 72.0f, 265.0f, 175.0f, 77.0f);
+	for (const float X : { 180.0f, 258.0f }) for (const float Y : { 90.0f, 168.0f }) Box(ESurface::Wood, X - 2.5f, Y - 2.5f, 0.0f, X + 2.5f, Y + 2.5f, 72.0f);
+	Put(EFurniture::DiningChair, 220.0f, 60.0f, 90.0f);
+	Put(EFurniture::DiningChair, 220.0f, 200.0f, -90.0f);
+	Put(EFurniture::DiningChair, 150.0f, 130.0f, 0.0f);
+	Put(EFurniture::DiningChair, 290.0f, 130.0f, 180.0f);
 	Put(EFurniture::Stove, 420.0f, 110.0f, 180.0f);
 	Put(EFurniture::KitchenCabinet, 220.0f, -30.0f, 90.0f);
 	Put(EFurniture::KitchenCabinet, 320.0f, -30.0f, 90.0f);
-	Box(ESurface::InteriorWall, 60.0f, 170.0f, 0.0f, 130.0f, 240.0f, 180.0f);
+	Box(ESurface::InteriorWall, 372.0f, 195.0f, 0.0f, 434.0f, 255.0f, 180.0f);   // refrigerator, out of the doorway
 	Put(EFurniture::CeilingLamp, 250.0f, 110.0f, 0.0f, Wall - 45.0f);
 	Put(EFurniture::Shelf, 250.0f, -195.0f, 90.0f);
 	Put(EFurniture::Shelf, 420.0f, -130.0f, 180.0f);
@@ -798,12 +811,12 @@ FHouse GenerateFamilyHouse1719()
 	Box(ESurface::InteriorWall, 80.0f, -260.0f, 0.0f, 115.0f, -225.0f, 40.0f);              // toilet
 	Box(ESurface::InteriorWall, 190.0f, -290.0f, 0.0f, 240.0f, -262.0f, 85.0f);              // sink
 	Put(EFurniture::Mirror, 215.0f, -262.0f, 90.0f, 110.0f);
-	Put(EFurniture::CeilingLamp, 230.0f, -250.0f, 0.0f, Wall - 45.0f);
+	Put(EFurniture::CeilingLamp, 150.0f, -250.0f, 0.0f, Wall - 45.0f);
 	// Master bedroom (west, middle) and the baby's room (west, back; once the den).
 	Tinted(ESurface::InteriorWall, FLinearColor(0.85f, 0.78f, 0.66f), -HX + 14.0f, 30.0f, 0.0f, -HX + 204.0f, 170.0f, 26.0f);   // mattress, no visible frame
 	Put(EFurniture::Nightstand, -HX + 40.0f, 0.0f, 0.0f);
 	Put(EFurniture::Nightstand, -HX + 40.0f, 200.0f, 0.0f);
-	Put(EFurniture::Drawers, -230.0f, 260.0f, -90.0f);
+	Put(EFurniture::Drawers, -230.0f, 225.0f, -90.0f);
 	Put(EFurniture::Mirror, -100.0f, 240.0f, -90.0f, 100.0f);
 	Put(EFurniture::CeilingLamp, -240.0f, 100.0f, 0.0f, Wall - 45.0f);
 	Box(ESurface::Wood, -HX + 14.0f, -240.0f, 20.0f, -HX + 154.0f, -170.0f, 25.0f);          // crib

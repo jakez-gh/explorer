@@ -485,6 +485,14 @@ namespace RealPlace
 			if (Nearest != INDEX_NONE)
 			{
 				Place.Lots[Nearest].bFamilyHouse = true;
+				// Test spots inside the house for -StartAt: local (x, y) in cm from the middle of the ground floor.
+				const FLot& Hero = Place.Lots[Nearest];
+				auto InHouse = [&](float X, float Y) { const FVector W = FRotator(0.0f, Hero.Yaw, 0.0f).RotateVector(FVector(X, Y, 0.0f)); return FVector2D(Hero.Pos.X + W.X, Hero.Pos.Y + W.Y); };
+				Place.Landmarks.Add({ TEXT("1719 kitchen"), InHouse(220.0f, 130.0f) });
+				Place.Landmarks.Add({ TEXT("1719 living room"), InHouse(-150.0f, 380.0f) });
+				Place.Landmarks.Add({ TEXT("1719 hall"), InHouse(0.0f, 0.0f) });
+				Place.Landmarks.Add({ TEXT("1719 basement"), InHouse(0.0f, 250.0f) });
+				UE_LOG(LogTemp, Display, TEXT("RealPlace: 1719 Avenue E at X=%.0f Y=%.0f yaw=%.1f"), Hero.Pos.X, Hero.Pos.Y, Hero.Yaw);
 				Place.Lots[Nearest].Width = 900.0f;
 				Place.Lots[Nearest].Depth = 1100.0f;
 			}
@@ -667,6 +675,63 @@ namespace RealPlace
 			}
 		}
 		return bFound;
+	}
+
+	bool Occupied(const FVector2D& P)
+	{
+		if (!bReady.load())
+		{
+			return false;
+		}
+		const int32 BX = FMath::FloorToInt(P.X / RoadBucket), BY = FMath::FloorToInt(P.Y / RoadBucket);
+		for (int32 DY = -1; DY <= 1; ++DY)
+		{
+			for (int32 DX = -1; DX <= 1; ++DX)
+			{
+				if (const TArray<int32>* Bucket = Place.BuildingGrid.Find(FIntPoint(BX + DX, BY + DY)))
+				{
+					for (const int32 Index : *Bucket)
+					{
+						const FBuilding& B = Place.Buildings[Index];
+						if (FVector2D::DistSquared(B.Centroid, P) > 9.0e6)
+						{
+							continue;
+						}
+						bool bInside = false;
+						double MinEdge = 1.0e12;
+						for (int32 i = 0, j = B.Outline.Num() - 1; i < B.Outline.Num(); j = i++)
+						{
+							const FVector2D& A = B.Outline[i];
+							const FVector2D& C = B.Outline[j];
+							if (((A.X > P.X) != (C.X > P.X)) && (P.Y < (C.Y - A.Y) * (P.X - A.X) / (C.X - A.X) + A.Y))
+							{
+								bInside = !bInside;
+							}
+							const FVector2D AB = C - A;
+							const double U = FMath::Clamp(FVector2D::DotProduct(P - A, AB) / FMath::Max(AB.SizeSquared(), 1.0), 0.0, 1.0);
+							MinEdge = FMath::Min(MinEdge, static_cast<double>(FVector2D::DistSquared(P, A + AB * U)));
+					}
+						if (bInside || MinEdge < 150.0 * 150.0)
+						{
+							return true;
+						}
+					}
+				}
+				if (const TArray<int32>* Bucket = Place.LotGrid.Find(FIntPoint(BX + DX, BY + DY)))
+				{
+					for (const int32 Index : *Bucket)
+					{
+						const FLot& L = Place.Lots[Index];
+						const FVector Local = FRotator(0.0f, -L.Yaw, 0.0f).RotateVector(FVector(P.X - L.Pos.X, P.Y - L.Pos.Y, 0.0));
+						if (FMath::Abs(Local.X) < L.Width * 0.5f + 150.0f && Local.Y > -L.Depth * 0.5f - 150.0f && Local.Y < L.Depth * 0.5f + 320.0f)
+						{
+							return true;
+						}
+					}
+				}
+			}
+		}
+		return false;
 	}
 
 	void LotsIn(const FVector2D& Min, const FVector2D& Max, TArray<const FLot*>& Out)
