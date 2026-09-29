@@ -465,8 +465,11 @@ namespace RealPlace
 			}
 			Block.Sort([](const FVector2D& A, const FVector2D& B) { return A.Y > B.Y; });
 			UE_LOG(LogTemp, Display, TEXT("RealPlace: %d house lots; %d on Avenue E between 17th and 18th"), Place.Lots.Num(), Block.Num());
-			const FVector2D Spot = Block.Num() > 0 ? Block[FMath::Min(16, Block.Num() - 1)] : ToWorld(-1497.0, 745.0);
-			Place.Landmarks.Add({ TEXT("1733 Avenue E"), Spot });
+			const FVector2D Spot33 = Block.Num() > 0 ? Block[FMath::Min(16, Block.Num() - 1)] : ToWorld(-1497.0, 745.0);
+			Place.Landmarks.Add({ TEXT("1733 Avenue E"), Spot33 });
+			// The family's house is 1719 Avenue E (renumbered since): the 10th odd number after 17th Street.
+			const FVector2D Spot = Block.Num() > 0 ? Block[FMath::Min(9, Block.Num() - 1)] : ToWorld(-1490.0, 745.0);
+			Place.Landmarks.Add({ TEXT("1719 Avenue E"), Spot });
 			// That lot becomes the hand-planned house.
 			int32 Nearest = INDEX_NONE;
 			double NearestD = 1500.0;
